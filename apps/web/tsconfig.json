@@ -1,0 +1,41 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "preserve",
+    "noEmit": true,
+    "allowJs": true,
+    "incremental": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
+    "resolveJsonModule": true,
+    "isolatedModules": true
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    ".next-e2e-db-3002/types/**/*.ts",
+    ".next-e2e-db-3213/types/**/*.ts",
+    ".next-e2e-db-3214/types/**/*.ts",
+    ".next-e2e-db-3215/types/**/*.ts",
+    ".next-e2e-db-3216/types/**/*.ts",
+    ".next-local-3002/types/**/*.ts",
+    ".next-playwright-3000/types/**/*.ts",
+    ".next-playwright-3003/types/**/*.ts",
+    ".next-playwright-3230/types/**/*.ts",
+    ".next/types/**/*.ts",
+    "next-env.d.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Next.js and build output
+.next/
+.next-*/
+**/.next/
+**/.next-*/
+dist/
+**/dist/
+coverage/
+playwright-report/
+test-results/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Private medical documents and local data
+**/.private-documents/
+*.log
+.DS_Store
+# TypeScript incremental compiler cache
+*.tsbuildinfo

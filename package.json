@@ -1,0 +1,16 @@
+{
+  "name": "smart-healthcare-soa",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": ["apps/web", "services/api", "packages/shared"],
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,green \"npm run dev -w @healthcare/api\" \"npm run dev -w @healthcare/web\"",
+    "build": "npm run build -w @healthcare/shared && npm run build -w @healthcare/api && npm run build -w @healthcare/web",
+    "test": "npm run test -w @healthcare/api",
+    "typecheck": "npm run typecheck -w @healthcare/shared && npm run typecheck -w @healthcare/api && npm run typecheck -w @healthcare/web"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.3"
+  }
+}
