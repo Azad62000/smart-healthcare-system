@@ -23,14 +23,17 @@ type PendingDoctor = {
   bio: string | null;
   approvalStatus: "pending";
 };
-type ManagedUser = { id: string; email: string; role: "Patient" | "Doctor" | "Admin"; status: "active" | "inactive" | "locked"; createdAt: string };
-type ServiceHealth = { name: string; status: "healthy" | "unavailable" | "not_configured"; checkedAt: string; responseTimeMs: number | null; detail: string };
+type ManagedUser = { id: string; email: string; role: "Patient" | "Doctor" | "Admin"; status: "active" | "inactive" | "locked"; createdAt: string; patientProfileComplete?: boolean; doctorApprovalStatus?: string | null; specialization?: string | null; qualification?: string | null; experienceYears?: number | null; city?: string | null; consultationFeeInr?: number | null };
+type ServiceHealth = { name: string; status: "healthy" | "unavailable" | "configured" | "not_configured"; checkedAt: string; responseTimeMs: number | null; detail: string };
 type SchedulingOption = { id: string; name: string; email: string };
+type ScheduleDoctor = SchedulingOption & { specialization: string; qualification: string | null; experienceYears: number | null; city: string | null; consultationFeeInr: number | null; available: boolean; unavailableReason: string | null; conflicts: Array<{ startsAt: string; endsAt: string; patientName: string }> };
 type AdminAppointment = {
   id: string; patientDisplayName: string; patientEmail: string; doctorDisplayName: string; doctorEmail: string;
   startsAt: string; endsAt: string; status: string; type: "in_person" | "video";
   schedulingNote: string | null; adminNote: string | null;
 };
+type Pagination = { page: number; pageSize: number; total: number; totalPages: number };
+type RecordDetail = { kind: "patient" | "doctor" | "account"; user: ManagedUser } | { kind: "appointment"; appointment: AdminAppointment };
 
 export default function AdminDashboard() {
   const [overview, setOverview] = useState<Overview | null>(null);
@@ -43,6 +46,7 @@ export default function AdminDashboard() {
   const [decisionNotice, setDecisionNotice] = useState("");
   const [decisionInProgress, setDecisionInProgress] = useState("");
   const [users, setUsers] = useState<ManagedUser[]>([]);
+  const [userPagination, setUserPagination] = useState<Pagination>({ page: 1, pageSize: 25, total: 0, totalPages: 0 });
   const [usersLoading, setUsersLoading] = useState(true);
   const [usersError, setUsersError] = useState("");
   const [userSearch, setUserSearch] = useState("");
@@ -55,11 +59,27 @@ export default function AdminDashboard() {
   const [servicesError, setServicesError] = useState("");
   const [scheduleOptions, setScheduleOptions] = useState<{ patients: SchedulingOption[]; doctors: SchedulingOption[] }>({ patients: [], doctors: [] });
   const [adminAppointments, setAdminAppointments] = useState<AdminAppointment[]>([]);
+  const [appointmentPagination, setAppointmentPagination] = useState<Pagination>({ page: 1, pageSize: 25, total: 0, totalPages: 0 });
+  const [appointmentListView, setAppointmentListView] = useState<"all" | "pending" | "upcoming">("all");
+  const [appointmentStatusFilter, setAppointmentStatusFilter] = useState("");
+  const [appointmentDateRange, setAppointmentDateRange] = useState({ from: "", to: "" });
+  const [recordDetail, setRecordDetail] = useState<RecordDetail | null>(null);
   const [scheduleError, setScheduleError] = useState("");
   const [scheduleNotice, setScheduleNotice] = useState("");
   const [scheduleBusy, setScheduleBusy] = useState(false);
   const [reschedulingId, setReschedulingId] = useState("");
   const [rescheduleTimes, setRescheduleTimes] = useState({ startsAt: "", endsAt: "" });
+  const [scheduleTimes, setScheduleTimes] = useState({ startsAt: "", endsAt: "" });
+  const [scheduleType, setScheduleType] = useState<"video" | "in_person">("video");
+  const [doctorSpecialization, setDoctorSpecialization] = useState("");
+  const [doctorCity, setDoctorCity] = useState("");
+  const [minimumExperience, setMinimumExperience] = useState("");
+  const [maximumFee, setMaximumFee] = useState("");
+  const [scheduleDoctors, setScheduleDoctors] = useState<ScheduleDoctor[]>([]);
+  const [availabilityChecked, setAvailabilityChecked] = useState(false);
+  const [availabilityLoading, setAvailabilityLoading] = useState(false);
+  const [selectedDoctorId, setSelectedDoctorId] = useState("");
+  const [recordView, setRecordView] = useState<"patients" | "doctors" | "appointments" | "pending" | "upcoming" | null>(null);
 
   const loadOverview = useCallback(async () => {
     setLoading(true); setError("");
@@ -79,15 +99,19 @@ export default function AdminDashboard() {
     finally { setPendingLoading(false); }
   }, []);
 
-  const loadUsers = useCallback(async (search: string, role: string, status: string) => {
+  const loadUsers = useCallback(async (search: string, role: string, status: string, page = 1, profileFilter: "patients" | "approved-doctors" | null = null) => {
     setUsersLoading(true); setUsersError("");
     try {
       const query = new URLSearchParams();
       if (search.trim()) query.set("search", search.trim());
       if (role) query.set("role", role);
       if (status) query.set("status", status);
-      const data = await apiData<{ users: ManagedUser[] }>(`/api/v1/admin/users${query.size ? `?${query}` : ""}`);
+      if (profileFilter === "patients") query.set("patientProfileComplete", "true");
+      if (profileFilter === "approved-doctors") query.set("doctorApprovalStatus", "approved");
+      query.set("page", String(page)); query.set("pageSize", "25");
+      const data = await apiData<{ users: ManagedUser[]; pagination: Pagination }>(`/api/v1/admin/users?${query}`);
       setUsers(data.users);
+      setUserPagination(data.pagination ?? { page, pageSize: 25, total: data.users.length, totalPages: 1 });
     } catch (cause) { setUsersError(cause instanceof Error ? cause.message : "Users could not be loaded."); }
     finally { setUsersLoading(false); }
   }, []);
@@ -100,26 +124,68 @@ export default function AdminDashboard() {
     } catch (cause) { setServicesError(cause instanceof Error ? cause.message : "Service status could not be loaded."); }
     finally { setServicesLoading(false); }
   }, []);
-  const loadAppointments = useCallback(async () => {
+  const loadScheduleOptions = useCallback(async () => {
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}/api/v1/admin/appointments/options`, { credentials: "include" });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error?.message ?? "Scheduling options could not be loaded.");
+      setScheduleOptions(body.data);
+    } catch (cause) { setScheduleError(cause instanceof Error ? cause.message : "Scheduling options could not be loaded."); }
+  }, []);
+  const loadAppointments = useCallback(async (page = 1, view: "all" | "pending" | "upcoming" = "all", status = "", from = "", to = "") => {
     setScheduleError("");
     try {
-      const [optionsResponse, appointmentsResponse] = await Promise.all([
-        fetch(`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}/api/v1/admin/appointments/options`, { credentials: "include" }),
-        fetch(`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}/api/v1/admin/appointments`, { credentials: "include" })
-      ]);
-      const [optionsBody, appointmentsBody] = await Promise.all([optionsResponse.json(), appointmentsResponse.json()]);
-      if (!optionsResponse.ok) throw new Error(optionsBody.error?.message ?? "Scheduling options could not be loaded.");
+      const query = new URLSearchParams({ page: String(page), pageSize: "25", view });
+      if (status) query.set("status", status);
+      if (from) query.set("from", new Date(`${from}T00:00`).toISOString());
+      if (to) query.set("to", new Date(`${to}T23:59:59.999`).toISOString());
+      const appointmentsResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}/api/v1/admin/appointments?${query}`, { credentials: "include" });
+      const appointmentsBody = await appointmentsResponse.json();
       if (!appointmentsResponse.ok) throw new Error(appointmentsBody.error?.message ?? "Appointments could not be loaded.");
-      setScheduleOptions(optionsBody.data);
       setAdminAppointments(appointmentsBody.data.appointments);
+      setAppointmentPagination(appointmentsBody.data.pagination ?? { page, pageSize: 25, total: appointmentsBody.data.appointments.length, totalPages: 1 });
+      setAppointmentListView(view);
     } catch (cause) { setScheduleError(cause instanceof Error ? cause.message : "Appointments could not be loaded."); }
   }, []);
 
+  async function checkDoctorAvailability() {
+    if (!scheduleTimes.startsAt || !scheduleTimes.endsAt || new Date(scheduleTimes.endsAt) <= new Date(scheduleTimes.startsAt)) {
+      setScheduleError("Choose a valid start and end time before checking availability.");
+      return;
+    }
+    setAvailabilityLoading(true); setScheduleError(""); setAvailabilityChecked(false);
+    try {
+      const query = new URLSearchParams({ startsAt: new Date(scheduleTimes.startsAt).toISOString(), endsAt: new Date(scheduleTimes.endsAt).toISOString(), type: scheduleType });
+      if (doctorSpecialization.trim()) query.set("specialization", doctorSpecialization.trim());
+      if (doctorCity.trim()) query.set("city", doctorCity.trim());
+      if (minimumExperience) query.set("minimumExperience", minimumExperience);
+      if (maximumFee) query.set("maximumFee", maximumFee);
+      const data = await apiData<{ doctors: ScheduleDoctor[] }>(`/api/v1/admin/appointments/availability?${query}`);
+      setScheduleDoctors(data.doctors);
+      setAvailabilityChecked(true);
+      setSelectedDoctorId((current) => data.doctors.some((doctor) => doctor.id === current && doctor.available) ? current : "");
+    } catch (cause) { setScheduleError(cause instanceof Error ? cause.message : "Doctor availability could not be checked."); }
+    finally { setAvailabilityLoading(false); }
+  }
+
+  async function showRecords(view: NonNullable<typeof recordView>) {
+    setRecordView(view);
+    if (view === "patients") await loadUsers("", "Patient", "", 1, "patients");
+    if (view === "doctors") await loadUsers("", "Doctor", "", 1, "approved-doctors");
+    if (["appointments", "pending", "upcoming"].includes(view)) {
+      setAppointmentStatusFilter("");
+      setAppointmentDateRange({ from: "", to: "" });
+      const listView = view === "appointments" ? "all" : view === "pending" ? "pending" : "upcoming";
+      await loadAppointments(1, listView);
+    }
+  }
+
   useEffect(() => { void loadOverview(); }, [loadOverview]);
   useEffect(() => { void loadPendingDoctors(); }, [loadPendingDoctors]);
-  useEffect(() => { void loadUsers("", "", ""); }, [loadUsers]);
+  useEffect(() => { void loadUsers("", "", "", 1); }, [loadUsers]);
   useEffect(() => { void loadServices(); }, [loadServices]);
-  useEffect(() => { void loadAppointments(); }, [loadAppointments]);
+  useEffect(() => { void loadScheduleOptions(); }, [loadScheduleOptions]);
+  useEffect(() => { void loadAppointments(1, "all"); }, [loadAppointments]);
 
   async function scheduleAppointment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -134,7 +200,7 @@ export default function AdminDashboard() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           patientId: form.get("patientId"),
-          doctorId: form.get("doctorId"),
+          doctorId: selectedDoctorId,
           startsAt: start.toISOString(),
           endsAt: end.toISOString(),
           type: form.get("type"),
@@ -146,7 +212,8 @@ export default function AdminDashboard() {
       if (!response.ok) throw new Error(body.error?.message ?? "Appointment could not be scheduled.");
       setScheduleNotice("Appointment scheduled and both participants notified.");
       event.currentTarget.reset();
-      await loadAppointments();
+      setSelectedDoctorId(""); setAvailabilityChecked(false); setScheduleDoctors([]); setScheduleTimes({ startsAt: "", endsAt: "" });
+      await Promise.all([loadAppointments(), loadOverview()]);
     } catch (cause) { setScheduleError(cause instanceof Error ? cause.message : "Appointment could not be scheduled."); }
     finally { setScheduleBusy(false); }
   }
@@ -160,7 +227,8 @@ export default function AdminDashboard() {
       const body = await response.json();
       if (!response.ok) throw new Error(body.error?.message ?? "Appointment could not be cancelled.");
       setScheduleNotice("Appointment cancelled and participants notified.");
-      await loadAppointments();
+      await Promise.all([loadAppointments(), loadOverview()]);
+      if (availabilityChecked) void checkDoctorAvailability();
     } catch (cause) { setScheduleError(cause instanceof Error ? cause.message : "Appointment could not be cancelled."); }
   }
 
@@ -178,7 +246,8 @@ export default function AdminDashboard() {
       setScheduleNotice("Appointment rescheduled and participants notified.");
       setReschedulingId("");
       setRescheduleTimes({ startsAt: "", endsAt: "" });
-      await loadAppointments();
+      await Promise.all([loadAppointments(), loadOverview()]);
+      if (availabilityChecked) void checkDoctorAvailability();
     } catch (cause) { setScheduleError(cause instanceof Error ? cause.message : "Appointment could not be rescheduled."); }
   }
 
@@ -192,6 +261,7 @@ export default function AdminDashboard() {
       });
       setPendingDoctors((current) => current.filter(({ id }) => id !== doctor.id));
       setDecisionNotice(`${doctor.givenName} ${doctor.familyName} was ${status}.`);
+      void loadOverview();
     } catch (cause) { setDecisionError(cause instanceof Error ? cause.message : "Doctor approval status could not be updated."); }
     finally { setDecisionInProgress(""); }
   }
@@ -216,12 +286,28 @@ export default function AdminDashboard() {
     {error && <div className="notice notice-error" role="alert"><span>{error}</span><button className="text-button" type="button" onClick={() => void loadOverview()}>Retry</button></div>}
     {loading ? <section className="dashboard-card loading-card" role="status"><span className="spinner" />Loading operational overview…</section> : overview && <>
       <section className="analytics-metrics" aria-label="Healthcare service summary">
-        <article className="dashboard-card metric-card"><p className="eyebrow">PATIENTS</p><strong>{overview.patientCount}</strong><span>Registered patient profiles</span></article>
-        <article className="dashboard-card metric-card"><p className="eyebrow">APPROVED DOCTORS</p><strong>{overview.approvedDoctorCount}</strong><span>Listed for patient booking</span></article>
-        <article className="dashboard-card metric-card"><p className="eyebrow">APPOINTMENTS</p><strong>{overview.appointmentCount}</strong><span>All appointment records</span></article>
-        <article className="dashboard-card metric-card"><p className="eyebrow">PENDING</p><strong>{overview.pendingAppointmentCount}</strong><span>Future bookings awaiting confirmation</span></article>
-        <article className="dashboard-card metric-card"><p className="eyebrow">UPCOMING</p><strong>{overview.upcomingAppointmentCount}</strong><span>Booked or confirmed from now</span></article>
+        <button className="dashboard-card metric-card metric-card-button" type="button" aria-expanded={recordView === "patients"} onClick={() => void showRecords("patients")}><span className="eyebrow">PATIENTS</span><strong>{overview.patientCount}</strong><span>Registered patient profiles · View records</span></button>
+        <button className="dashboard-card metric-card metric-card-button" type="button" aria-expanded={recordView === "doctors"} onClick={() => void showRecords("doctors")}><span className="eyebrow">APPROVED DOCTORS</span><strong>{overview.approvedDoctorCount}</strong><span>Listed for patient booking · View records</span></button>
+        <button className="dashboard-card metric-card metric-card-button" type="button" aria-expanded={recordView === "appointments"} onClick={() => void showRecords("appointments")}><span className="eyebrow">APPOINTMENTS</span><strong>{overview.appointmentCount}</strong><span>All appointment records · View records</span></button>
+        <button className="dashboard-card metric-card metric-card-button" type="button" aria-expanded={recordView === "pending"} onClick={() => void showRecords("pending")}><span className="eyebrow">PENDING</span><strong>{overview.pendingAppointmentCount}</strong><span>Future bookings awaiting confirmation · View records</span></button>
+        <button className="dashboard-card metric-card metric-card-button" type="button" aria-expanded={recordView === "upcoming"} onClick={() => void showRecords("upcoming")}><span className="eyebrow">UPCOMING</span><strong>{overview.upcomingAppointmentCount}</strong><span>Booked or confirmed from now · View records</span></button>
       </section>
+      {recordView && <section className="dashboard-card admin-records-card" aria-labelledby="admin-records-title">
+        <div className="card-heading"><div><p className="eyebrow">RECORDS</p><h2 id="admin-records-title">{recordView === "patients" ? "Registered patients" : recordView === "doctors" ? "Approved doctors" : recordView === "appointments" ? "All appointments" : recordView === "pending" ? "Pending appointments" : "Upcoming appointments"}</h2></div><button className="text-button" type="button" onClick={() => setRecordView(null)}>Close</button></div>
+        {recordView === "patients" && (usersLoading ? <p role="status">Loading patients…</p> : usersError ? <p className="notice notice-error" role="alert">{usersError}</p> : users.length === 0 ? <p className="notification-empty">No registered patient profiles found.</p> : <><div className="analytics-table-wrap"><table className="analytics-table"><thead><tr><th>Patient account</th><th>Registered</th><th>Account status</th></tr></thead><tbody>{users.map((user) => <tr key={user.id}><th><button className="record-link" type="button" onClick={() => setRecordDetail({ kind: "patient", user })}>{user.email}</button></th><td>{new Date(user.createdAt).toLocaleDateString()}</td><td><span className={`record-status record-status-${user.status}`}>{user.status}</span></td></tr>)}</tbody></table></div><PaginationControls pagination={userPagination} onPage={(page) => void loadUsers("", "Patient", "", page, "patients")} /></>)}
+        {recordView === "doctors" && (usersLoading ? <p role="status">Loading approved doctors…</p> : usersError ? <p className="notice notice-error" role="alert">{usersError}</p> : users.length === 0 ? <p className="notification-empty">No approved doctors found.</p> : <><div className="analytics-table-wrap"><table className="analytics-table"><thead><tr><th>Doctor account</th><th>Specialization</th><th>Qualification</th><th>Experience</th><th>City</th><th>Fee</th><th>Account status</th></tr></thead><tbody>{users.map((doctor) => <tr key={doctor.id}><th><button className="record-link" type="button" onClick={() => setRecordDetail({ kind: "doctor", user: doctor })}>{doctor.email}</button></th><td>{doctor.specialization ?? "—"}</td><td>{doctor.qualification ?? "—"}</td><td>{doctor.experienceYears ?? "—"}</td><td>{doctor.city ?? "—"}</td><td>{doctor.consultationFeeInr == null ? "—" : `₹${doctor.consultationFeeInr}`}</td><td><span className={`record-status record-status-${doctor.status}`}>{doctor.status}</span></td></tr>)}</tbody></table></div><PaginationControls pagination={userPagination} onPage={(page) => void loadUsers("", "Doctor", "", page, "approved-doctors")} /></>)}
+        {(recordView === "appointments" || recordView === "pending" || recordView === "upcoming") && <div className="admin-record-filters">
+          {recordView === "appointments" && <label className="record-filter-label">Status<select value={appointmentStatusFilter} onChange={(event) => { const status = event.target.value; setAppointmentStatusFilter(status); void loadAppointments(1, "all", status, appointmentDateRange.from, appointmentDateRange.to); }}><option value="">All statuses</option><option value="booked">Booked</option><option value="confirmed">Confirmed</option><option value="cancelled">Cancelled</option><option value="completed">Completed</option><option value="no_show">No show</option></select></label>}
+          <label className="record-filter-label">From<input type="date" value={appointmentDateRange.from} onChange={(event) => { const from = event.target.value; setAppointmentDateRange((current) => ({ ...current, from })); void loadAppointments(1, appointmentListView, appointmentStatusFilter, from, appointmentDateRange.to); }} /></label>
+          <label className="record-filter-label">Through<input type="date" value={appointmentDateRange.to} onChange={(event) => { const to = event.target.value; setAppointmentDateRange((current) => ({ ...current, to })); void loadAppointments(1, appointmentListView, appointmentStatusFilter, appointmentDateRange.from, to); }} /></label>
+        </div>}
+        {(recordView === "appointments" || recordView === "pending" || recordView === "upcoming") && (() => {
+          const now = Date.now();
+          const records = adminAppointments.filter((appointment) => recordView === "appointments" || (recordView === "pending" ? appointment.status === "booked" && Date.parse(appointment.startsAt) >= now : ["booked", "confirmed"].includes(appointment.status) && Date.parse(appointment.startsAt) >= now));
+          return records.length === 0 ? <p className="notification-empty">No matching appointments found.</p> : <div className="analytics-table-wrap"><table className="analytics-table"><thead><tr><th>Appointment</th><th>Patient</th><th>Doctor</th><th>Status</th><th>Type</th></tr></thead><tbody>{records.map((appointment) => <tr key={appointment.id}><th><button className="record-link" type="button" onClick={() => setRecordDetail({ kind: "appointment", appointment })}>{new Date(appointment.startsAt).toLocaleString()}</button></th><td>{appointment.patientDisplayName}<br />{appointment.patientEmail}</td><td>{appointment.doctorDisplayName}<br />{appointment.doctorEmail}</td><td><span className={`record-status record-status-${appointment.status}`}>{appointment.status}</span></td><td>{appointment.type.replace("_", " ")}</td></tr>)}</tbody></table></div>;
+        })()}
+        {(recordView === "appointments" || recordView === "pending" || recordView === "upcoming") && <PaginationControls pagination={appointmentPagination} onPage={(page) => void loadAppointments(page, appointmentListView, appointmentStatusFilter, appointmentDateRange.from, appointmentDateRange.to)} />}
+      </section>}
       <section className="dashboard-card analytics-status-card"><div className="card-heading"><div><p className="eyebrow">APPOINTMENT ACTIVITY</p><h2 id="appointments-by-status">Appointments by status</h2></div></div>
         {overview.appointmentsByStatus.length === 0 ? <p className="notification-empty">No appointments have been recorded.</p> : <div className="analytics-table-wrap"><table className="analytics-table" aria-labelledby="appointments-by-status"><thead><tr><th scope="col">Status</th><th scope="col">Count</th></tr></thead><tbody>{overview.appointmentsByStatus.map(({ status, count }) => <tr key={status}><th scope="row">{status.replace("_", " ")}</th><td>{count}</td></tr>)}</tbody><tfoot><tr><th scope="row">Total</th><td>{overview.appointmentCount}</td></tr></tfoot></table></div>}
         <p className="analytics-timestamp">Updated {new Date(overview.generatedAt).toLocaleString()}</p>
@@ -234,19 +320,31 @@ export default function AdminDashboard() {
         <form className="profile-form" onSubmit={(event) => void scheduleAppointment(event)}>
           <div className="form-row">
             <label>Patient<select name="patientId" required defaultValue=""><option value="" disabled>Select a patient</option>{scheduleOptions.patients.map((patient) => <option key={patient.id} value={patient.id}>{patient.name} · {patient.email}</option>)}</select></label>
-            <label>Doctor<select name="doctorId" required defaultValue=""><option value="" disabled>Select an approved doctor</option>{scheduleOptions.doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.name} · {doctor.email}</option>)}</select></label>
+            <label>Appointment type<select name="type" value={scheduleType} onChange={(event) => { setScheduleType(event.target.value as "video" | "in_person"); setAvailabilityChecked(false); }}><option value="video">Video consultation</option><option value="in_person">In person</option></select></label>
           </div>
           <div className="form-row">
-            <label>Start date and time<input name="startsAt" type="datetime-local" required /></label>
-            <label>End date and time<input name="endsAt" type="datetime-local" required /></label>
+            <label>Start date and time<input name="startsAt" type="datetime-local" required value={scheduleTimes.startsAt} onChange={(event) => { setScheduleTimes((value) => ({ ...value, startsAt: event.target.value })); setAvailabilityChecked(false); }} /></label>
+            <label>End date and time<input name="endsAt" type="datetime-local" required value={scheduleTimes.endsAt} onChange={(event) => { setScheduleTimes((value) => ({ ...value, endsAt: event.target.value })); setAvailabilityChecked(false); }} /></label>
           </div>
-          <label>Appointment type<select name="type" defaultValue="video"><option value="video">Video consultation</option><option value="in_person">In person</option></select></label>
+          <fieldset className="admin-doctor-filters"><legend>Doctor filters</legend><div className="form-row">
+            <label>Specialization<input minLength={2} value={doctorSpecialization} onChange={(event) => { setDoctorSpecialization(event.target.value); setAvailabilityChecked(false); }} placeholder="e.g. Cardiology" /></label>
+            <label>City<input minLength={2} value={doctorCity} onChange={(event) => { setDoctorCity(event.target.value); setAvailabilityChecked(false); }} placeholder="Any city" /></label>
+            <label>Minimum experience (years)<input type="number" min="0" max="60" value={minimumExperience} onChange={(event) => { setMinimumExperience(event.target.value); setAvailabilityChecked(false); }} /></label>
+            <label>Maximum fee (INR)<input type="number" min="0" value={maximumFee} onChange={(event) => { setMaximumFee(event.target.value); setAvailabilityChecked(false); }} /></label>
+          </div></fieldset>
+          <button className="secondary-button" type="button" onClick={() => void checkDoctorAvailability()} disabled={availabilityLoading || !scheduleTimes.startsAt || !scheduleTimes.endsAt}>{availabilityLoading ? "Checking doctors…" : "Check doctor availability"}</button>
+          {availabilityChecked && <>
+            <label>Available doctor<select name="doctorId" required value={selectedDoctorId} onChange={(event) => setSelectedDoctorId(event.target.value)}><option value="">{scheduleDoctors.some((doctor) => doctor.available) ? "Select an available doctor" : "No doctor available for this slot"}</option>{scheduleDoctors.filter((doctor) => doctor.available).map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.name} · {doctor.specialization}{doctor.city ? ` · ${doctor.city}` : ""}{doctor.experienceYears !== null ? ` · ${doctor.experienceYears} yrs` : ""}</option>)}</select></label>
+            {scheduleDoctors.filter((doctor) => !doctor.available).length > 0 && <section className="admin-busy-doctors" aria-label="Doctors unavailable for selected time"><h3>Unavailable for this time</h3><ul>{scheduleDoctors.filter((doctor) => !doctor.available).map((doctor) => <li key={doctor.id}><strong>Dr. {doctor.name}</strong> · {doctor.specialization} — {doctor.unavailableReason === "already_booked" ? "Already booked" : doctor.unavailableReason === "outside_availability" ? "Outside published availability" : "Not accepting appointments"}{doctor.conflicts.map((conflict) => <span className="form-help" key={`${conflict.startsAt}-${conflict.endsAt}`}>Booked {new Date(conflict.startsAt).toLocaleString()}–{new Date(conflict.endsAt).toLocaleTimeString()} · {conflict.patientName}</span>)}</li>)}</ul></section>}
+            {scheduleDoctors.length === 0 && <p className="notification-empty">No approved doctors match these filters.</p>}
+          </>}
           <label>Consultation reason or scheduling note<input name="schedulingNote" maxLength={1000} /></label>
           <label>Internal admin note<textarea name="adminNote" maxLength={2000} rows={2} /></label>
-          <button className="primary-button" type="submit" disabled={scheduleBusy}>{scheduleBusy ? "Scheduling…" : "Schedule appointment"}</button>
+          <button className="primary-button" type="submit" disabled={scheduleBusy || !availabilityChecked || !selectedDoctorId}>{scheduleBusy ? "Scheduling…" : "Schedule appointment"}</button>
         </form>
-        <h3>Scheduled appointments</h3>
-        {adminAppointments.length === 0 ? <p className="notification-empty">No appointments found.</p> : <div className="analytics-table-wrap"><table className="analytics-table"><thead><tr><th>Time</th><th>Patient</th><th>Doctor</th><th>Type / status</th><th>Actions</th></tr></thead><tbody>{adminAppointments.map((appointment) => <tr key={appointment.id}><td>{new Date(appointment.startsAt).toLocaleString()} ({Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"})</td><td>{appointment.patientDisplayName}<br />{appointment.patientEmail}</td><td>{appointment.doctorDisplayName}<br />{appointment.doctorEmail}</td><td>{appointment.type.replace("_", " ")} / {appointment.status}</td><td>{["booked", "confirmed"].includes(appointment.status) && <><button className="secondary-button" type="button" onClick={() => { setReschedulingId(reschedulingId === appointment.id ? "" : appointment.id); setRescheduleTimes({ startsAt: new Date(new Date(appointment.startsAt).getTime() - new Date(appointment.startsAt).getTimezoneOffset() * 60000).toISOString().slice(0, 16), endsAt: new Date(new Date(appointment.endsAt).getTime() - new Date(appointment.endsAt).getTimezoneOffset() * 60000).toISOString().slice(0, 16) }); }}>Reschedule</button> <button className="secondary-button" type="button" onClick={() => void cancelAppointment(appointment.id)}>Cancel</button></>}{reschedulingId === appointment.id && <form className="profile-form" onSubmit={(event) => void rescheduleAppointment(event, appointment.id)}><label>New start<input type="datetime-local" required value={rescheduleTimes.startsAt} onChange={(event) => setRescheduleTimes((current) => ({ ...current, startsAt: event.target.value }))} /></label><label>New end<input type="datetime-local" required value={rescheduleTimes.endsAt} onChange={(event) => setRescheduleTimes((current) => ({ ...current, endsAt: event.target.value }))} /></label><button className="primary-button" type="submit">Save new time</button></form>}</td></tr>)}</tbody></table></div>}
+        {!(["appointments", "pending", "upcoming"] as string[]).includes(recordView ?? "") && <><h3>Scheduled appointments</h3>
+        {adminAppointments.length === 0 ? <p className="notification-empty">No appointments found.</p> : <><div className="analytics-table-wrap"><table className="analytics-table"><thead><tr><th>Appointment</th><th>Patient</th><th>Doctor</th><th>Type / status</th><th>Actions</th></tr></thead><tbody>{adminAppointments.map((appointment) => <tr key={appointment.id}><th><button className="record-link" type="button" onClick={() => setRecordDetail({ kind: "appointment", appointment })}>{new Date(appointment.startsAt).toLocaleString()} ({Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"})</button></th><td>{appointment.patientDisplayName}<br />{appointment.patientEmail}</td><td>{appointment.doctorDisplayName}<br />{appointment.doctorEmail}</td><td>{appointment.type.replace("_", " ")} / {appointment.status}</td><td>{["booked", "confirmed"].includes(appointment.status) && <><button className="secondary-button" type="button" onClick={() => { setReschedulingId(reschedulingId === appointment.id ? "" : appointment.id); setRescheduleTimes({ startsAt: new Date(new Date(appointment.startsAt).getTime() - new Date(appointment.startsAt).getTimezoneOffset() * 60000).toISOString().slice(0, 16), endsAt: new Date(new Date(appointment.endsAt).getTime() - new Date(appointment.endsAt).getTimezoneOffset() * 60000).toISOString().slice(0, 16) }); }}>Reschedule</button> <button className="secondary-button" type="button" onClick={() => void cancelAppointment(appointment.id)}>Cancel</button></>}{reschedulingId === appointment.id && <form className="profile-form" onSubmit={(event) => void rescheduleAppointment(event, appointment.id)}><label>New start<input type="datetime-local" required value={rescheduleTimes.startsAt} onChange={(event) => setRescheduleTimes((current) => ({ ...current, startsAt: event.target.value }))} /></label><label>New end<input type="datetime-local" required value={rescheduleTimes.endsAt} onChange={(event) => setRescheduleTimes((current) => ({ ...current, endsAt: event.target.value }))} /></label><button className="primary-button" type="submit">Save new time</button></form>}</td></tr>)}</tbody></table></div><PaginationControls pagination={appointmentPagination} onPage={(page) => void loadAppointments(page, appointmentListView, appointmentStatusFilter, appointmentDateRange.from, appointmentDateRange.to)} /></>}
+        </>}
       </section>
     </>}
     <section className="dashboard-card admin-approval-card" aria-labelledby="doctor-approvals-heading">
@@ -282,7 +380,7 @@ export default function AdminDashboard() {
       {usersLoading ? <section className="loading-card" role="status"><span className="spinner" />Loading users…</section>
         : usersError ? null
           : users.length === 0 ? <p className="notification-empty">No users match these filters.</p>
-            : <div className="analytics-table-wrap"><table className="analytics-table admin-user-table"><caption className="visually-hidden">User accounts and account status controls</caption><thead><tr><th scope="col">Email</th><th scope="col">Role</th><th scope="col">Created</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead><tbody>{users.map((user) => <tr key={user.id}><th scope="row">{user.email}</th><td>{user.role}</td><td>{new Date(user.createdAt).toLocaleDateString()}</td><td><label className="visually-hidden" htmlFor={`user-status-${user.id}`}>Status for {user.email}</label><select id={`user-status-${user.id}`} value={user.status} onChange={(event) => void updateUserStatus(user, event.target.value as ManagedUser["status"])} disabled={userStatusBusy === user.id}><option value="active">Active</option><option value="inactive">Inactive</option><option value="locked">Locked</option></select></td><td>{userStatusBusy === user.id ? <span role="status">Saving…</span> : user.status}</td></tr>)}</tbody></table></div>}
+            : <><div className="analytics-table-wrap"><table className="analytics-table admin-user-table"><caption className="visually-hidden">User accounts and account status controls</caption><thead><tr><th scope="col">Email</th><th scope="col">Role</th><th scope="col">Created</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead><tbody>{users.map((user) => <tr key={user.id}><th scope="row"><button className="record-link" type="button" onClick={() => setRecordDetail({ kind: user.role === "Doctor" ? "doctor" : user.role === "Patient" ? "patient" : "account", user })}>{user.email}</button></th><td>{user.role}</td><td>{new Date(user.createdAt).toLocaleDateString()}</td><td><label className="visually-hidden" htmlFor={`user-status-${user.id}`}>Status for {user.email}</label><select id={`user-status-${user.id}`} value={user.status} onChange={(event) => void updateUserStatus(user, event.target.value as ManagedUser["status"])} disabled={userStatusBusy === user.id}><option value="active">Active</option><option value="inactive">Inactive</option><option value="locked">Locked</option></select></td><td>{userStatusBusy === user.id ? <span role="status">Saving…</span> : user.status}</td></tr>)}</tbody></table></div><PaginationControls pagination={userPagination} onPage={(page) => void loadUsers(userSearch, userRole, userStatus, page)} /></>}
       <p className="form-help">Role changes and account creation are not available here. The last active Admin and your own account cannot be deactivated.</p>
     </section>
     <section className="dashboard-card admin-services-card" aria-labelledby="admin-services-heading">
@@ -293,5 +391,17 @@ export default function AdminDashboard() {
           : <ul className="service-status-list">{services.map((service) => <li key={service.name}><div><strong>{service.name}</strong><p>{service.detail}</p><time dateTime={service.checkedAt}>Checked {new Date(service.checkedAt).toLocaleString()}</time></div><span className={`service-status service-status-${service.status}`}>{service.status.replace("_", " ")}{service.responseTimeMs !== null ? ` · ${service.responseTimeMs} ms` : ""}</span></li>)}</ul>}
       <p className="form-help">The API and PostgreSQL are checked directly. Optional integrations are reported as not configured when no adapter exists.</p>
     </section>
+    {recordDetail && <div className="record-detail-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setRecordDetail(null); }}><section className="record-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="record-detail-title"><header><div><p className="eyebrow">RECORD DETAILS</p><h2 id="record-detail-title">{recordDetail.kind === "patient" ? "Patient account" : recordDetail.kind === "doctor" ? "Doctor profile" : "Appointment details"}</h2></div><button className="text-button" type="button" aria-label="Close record details" onClick={() => setRecordDetail(null)}>Close</button></header>
+      {recordDetail.kind !== "appointment" ? <dl className="record-detail-grid"><dt>Email</dt><dd>{recordDetail.user.email}</dd><dt>Role</dt><dd>{recordDetail.user.role}</dd><dt>Account status</dt><dd><span className={`record-status record-status-${recordDetail.user.status}`}>{recordDetail.user.status}</span></dd><dt>Registered</dt><dd>{new Date(recordDetail.user.createdAt).toLocaleString()}</dd>{recordDetail.kind === "patient" ? <><dt>Patient profile</dt><dd>{recordDetail.user.patientProfileComplete ? "Complete" : "Incomplete"}</dd></> : recordDetail.kind === "doctor" ? <><dt>Approval</dt><dd>{recordDetail.user.doctorApprovalStatus ?? "Not reviewed"}</dd><dt>Specialization</dt><dd>{recordDetail.user.specialization ?? "Not provided"}</dd><dt>Qualification</dt><dd>{recordDetail.user.qualification ?? "Not provided"}</dd><dt>Experience</dt><dd>{recordDetail.user.experienceYears == null ? "Not provided" : `${recordDetail.user.experienceYears} years`}</dd><dt>City</dt><dd>{recordDetail.user.city ?? "Not provided"}</dd><dt>Consultation fee</dt><dd>{recordDetail.user.consultationFeeInr == null ? "Not provided" : `₹${recordDetail.user.consultationFeeInr}`}</dd></> : null}</dl> : <dl className="record-detail-grid"><dt>Starts</dt><dd>{new Date(recordDetail.appointment.startsAt).toLocaleString()}</dd><dt>Ends</dt><dd>{new Date(recordDetail.appointment.endsAt).toLocaleString()}</dd><dt>Patient</dt><dd>{recordDetail.appointment.patientDisplayName} · {recordDetail.appointment.patientEmail}</dd><dt>Doctor</dt><dd>{recordDetail.appointment.doctorDisplayName} · {recordDetail.appointment.doctorEmail}</dd><dt>Status</dt><dd>{recordDetail.appointment.status}</dd><dt>Type</dt><dd>{recordDetail.appointment.type.replace("_", " ")}</dd><dt>Scheduling note</dt><dd>{recordDetail.appointment.schedulingNote || "None"}</dd><dt>Admin note</dt><dd>{recordDetail.appointment.adminNote || "None"}</dd></dl>}
+    </section></div>}
   </main>;
+}
+
+function PaginationControls({ pagination, onPage }: { pagination: Pagination; onPage: (page: number) => void }) {
+  if (pagination.totalPages <= 1) return <p className="pagination-count">{pagination.total} record{pagination.total === 1 ? "" : "s"}</p>;
+  return <nav className="pagination-controls" aria-label="Record pages">
+    <button className="secondary-button" type="button" onClick={() => onPage(pagination.page - 1)} disabled={pagination.page <= 1}>Previous</button>
+    <span>Page {pagination.page} of {pagination.totalPages}<small>{pagination.total} records</small></span>
+    <button className="secondary-button" type="button" onClick={() => onPage(pagination.page + 1)} disabled={pagination.page >= pagination.totalPages}>Next</button>
+  </nav>;
 }

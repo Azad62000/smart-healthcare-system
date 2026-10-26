@@ -43,6 +43,8 @@ import { createAppointmentDocumentRouter } from "./documents/routes.js";
 import { PostgresAppointmentDocumentRepository } from "./documents/types.js";
 import { PrivateDocumentStorage } from "./documents/storage.js";
 import { MedicalDataCrypto } from "./medical-data-crypto.js";
+import { createFeedbackRouter } from "./feedback/routes.js";
+import { PostgresFeedbackRepository } from "./feedback/repository.js";
 
 const medicalDataCrypto = MedicalDataCrypto.fromConfiguration(config.MEDICAL_DATA_ENCRYPTION_KEYS);
 export const app = express();
@@ -89,6 +91,11 @@ app.use("/api/v1/doctors/recommendations", createDoctorRecommendationRouter(
 app.use("/api/v1/appointments", createAppointmentRouter(
   new PostgresAuthRepository(pool),
   appointmentRepository,
+  sessionCookieName
+));
+app.use("/api/v1/feedback", createFeedbackRouter(
+  new PostgresAuthRepository(pool),
+  new PostgresFeedbackRepository(pool),
   sessionCookieName
 ));
 app.use("/api/v1", createAppointmentDocumentRouter(

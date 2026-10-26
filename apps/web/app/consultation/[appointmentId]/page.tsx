@@ -106,7 +106,7 @@ export default function ConsultationPage() {
     try {
       await readResponse(await fetch(`${apiUrl}/api/v1/teleconsultations/${appointmentId}/end`, { method: "POST", credentials: "include" }));
       setJoin(null);
-      setConsultation((current) => current ? { ...current, actualEndedAt: new Date().toISOString(), status: "completed" } : current);
+      setConsultation((current) => current ? { ...current, actualEndedAt: new Date().toISOString(), appointmentStatus: "completed", status: "completed" } : current);
       setNotice("Consultation ended.");
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not end the consultation."); }
     finally { setBusy(false); }
@@ -137,7 +137,7 @@ export default function ConsultationPage() {
 
   if (loading) return <main className="patient-dashboard"><section className="dashboard-card loading-card" role="status">Loading consultation…</section></main>;
   return <main className="patient-dashboard">
-    <a className="back-link" href="/">← Return to home</a>
+    {role && <a className="dashboard-back-link public-dashboard-back" href={role === "Doctor" ? "/doctor" : role === "Admin" ? "/admin" : "/patient"}>← Back to dashboard</a>}
     <header className="dashboard-heading"><div><p className="eyebrow">TELEMEDICINE</p><h1>Video consultation</h1><p>{consultation ? `${consultation.doctorDisplayName} · ${new Date(consultation.startsAt).toLocaleString()}` : "Appointment details unavailable"}</p></div></header>
     {error && <p className="notice notice-error" role="alert">{error}</p>}
     {notice && <p className="notice notice-success" role="status">{notice}</p>}
@@ -160,6 +160,7 @@ export default function ConsultationPage() {
           {role === "Doctor" && <a href="/doctor/prescriptions">Prescription board</a>}
           {role === "Doctor" && <a href="/doctor/messages">Message patient</a>}
           {role === "Patient" && <a href="/patient/messages">Message care team</a>}
+          {role === "Patient" && consultation.appointmentStatus === "completed" && <a className="primary-button feedback-followup-link" href="/patient/appointments#history">Rate this consultation</a>}
           {(role === "Doctor" || role === "Patient") && <section className="consultation-notes">
             <h2>{role === "Doctor" ? "Consultation notes" : "Doctor's summary"}</h2>
             {role === "Patient" && (notes?.finalized_at ? <>

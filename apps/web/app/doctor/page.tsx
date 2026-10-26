@@ -125,7 +125,7 @@ export default function DoctorDashboard() {
   }
 
   return <main className="patient-dashboard doctor-dashboard">
-    <DashboardNav currentPath="/doctor" links={[{ href: "/doctor", label: "Overview" }, { href: "/doctor/messages", label: "Messages" }, { href: "/doctor/prescriptions", label: "Prescriptions" }, { href: "/doctor/ai-predictions", label: "AI predictions" }, { href: "/doctors", label: "Public directory" }]} />
+    <DashboardNav currentPath="/doctor" links={[{ href: "/doctor", label: "Overview" }, { href: "/doctor/feedback", label: "Patient feedback" }, { href: "/doctor/messages", label: "Messages" }, { href: "/doctor/prescriptions", label: "Prescriptions" }, { href: "/doctor/ai-predictions", label: "AI predictions" }, { href: "/doctors", label: "Public directory" }]} />
     <Notifications />
     <header className="dashboard-heading"><div><p className="eyebrow">DOCTOR WORKSPACE</p><h1>Doctor dashboard</h1><p>Manage your professional profile and availability.</p></div><a className="secondary-button" href="/doctors">Doctor directory</a></header>
     {error && <ErrorNotice message={error} onRetry={() => void loadProfile()} />}

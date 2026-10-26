@@ -21,6 +21,23 @@ const rescheduleSchema = z.object({
   endsAt: z.string().datetime({ offset: true })
 }).strict().refine((input) => Date.parse(input.endsAt) > Date.parse(input.startsAt), "Invalid appointment interval");
 const cancelSchema = z.object({ reason: z.string().trim().max(240).optional() }).strict();
+const availabilityQuery = z.object({
+  startsAt: z.string().datetime({ offset: true }),
+  endsAt: z.string().datetime({ offset: true }),
+  type: z.enum(["in_person", "video"]),
+  specialization: z.string().trim().min(2).max(100).optional(),
+  city: z.string().trim().min(2).max(80).optional(),
+  minimumExperience: z.coerce.number().int().min(0).max(60).optional(),
+  maximumFee: z.coerce.number().int().min(0).max(1_000_000).optional()
+}).strict().refine((query) => Date.parse(query.endsAt) > Date.parse(query.startsAt), "Invalid appointment interval");
+const listQuery = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(25),
+  view: z.enum(["all", "pending", "upcoming"]).default("all"),
+  status: z.enum(["booked", "confirmed", "cancelled", "completed", "no_show"]).optional(),
+  from: z.string().datetime({ offset: true }).optional(),
+  to: z.string().datetime({ offset: true }).optional()
+}).strict().refine((query) => !query.from || !query.to || Date.parse(query.to) > Date.parse(query.from), "Invalid appointment range");
 
 function currentUser(response: Parameters<import("express").RequestHandler>[1]): PublicUser {
   const user = response.locals.user as PublicUser | undefined;
@@ -39,10 +56,20 @@ export function createAdminAppointmentRouter(auth: AuthRepository, repository: A
     } catch (error) { next(error); }
   });
 
-  router.get("/", async (_request, response, next) => {
+  router.get("/availability", validateRequest({ query: availabilityQuery }), async (_request, response, next) => {
     try {
-      const appointments = await repository.list();
-      response.json({ success: true, data: { appointments }, meta: { requestId: response.locals.requestId } });
+      const filters = response.locals.validated.query as z.infer<typeof availabilityQuery>;
+      if (Date.parse(filters.startsAt) <= Date.now()) throw new ApiRequestError(400, "INVALID_APPOINTMENT_TIME", "Availability can only be checked for future times.");
+      const doctors = await repository.checkDoctorAvailability(filters);
+      response.json({ success: true, data: { doctors }, meta: { requestId: response.locals.requestId } });
+    } catch (error) { next(error); }
+  });
+
+  router.get("/", validateRequest({ query: listQuery }), async (_request, response, next) => {
+    try {
+      const query = response.locals.validated.query as z.infer<typeof listQuery>;
+      const result = await repository.list(query);
+      response.json({ success: true, data: result, meta: { requestId: response.locals.requestId } });
     } catch (error) { next(error); }
   });
 
@@ -62,6 +89,8 @@ export function createAdminAppointmentRouter(auth: AuthRepository, repository: A
         next(new ApiRequestError(400, "SCHEDULING_PARTICIPANT_INVALID", "Select an active patient and an active, approved doctor."));
       } else if ((error as { code?: string }).code === "APPOINTMENT_CONFLICT") {
         next(new ApiRequestError(409, "APPOINTMENT_CONFLICT", "The patient or doctor already has an appointment at that time."));
+      } else if ((error as { code?: string }).code === "DOCTOR_UNAVAILABLE") {
+        next(new ApiRequestError(409, "DOCTOR_UNAVAILABLE", "The doctor is not accepting this appointment type or time."));
       } else next(error);
     }
   });
@@ -76,6 +105,7 @@ export function createAdminAppointmentRouter(auth: AuthRepository, repository: A
       response.json({ success: true, data: { appointment }, meta: { requestId: response.locals.requestId } });
     } catch (error) {
       if ((error as { code?: string }).code === "APPOINTMENT_CONFLICT") next(new ApiRequestError(409, "APPOINTMENT_CONFLICT", "The patient or doctor already has an appointment at that time."));
+      else if ((error as { code?: string }).code === "DOCTOR_UNAVAILABLE") next(new ApiRequestError(409, "DOCTOR_UNAVAILABLE", "The doctor is not accepting this appointment type or time."));
       else next(error);
     }
   });

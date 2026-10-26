@@ -18,8 +18,10 @@ export function DashboardNav({ links, currentPath, label = "Dashboard navigation
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not sign out. Please try again."); }
     finally { setBusy(false); }
   }
+  const dashboardHref = currentPath.startsWith("/doctor") ? "/doctor" : currentPath.startsWith("/admin") ? "/admin" : "/patient";
+  const isDashboardHome = currentPath === dashboardHref;
   return <nav className="dashboard-nav" aria-label={label}>
-    <ul>{links.map(({ href, label: linkLabel }) => <li key={href}><a href={href} aria-current={currentPath === href ? "page" : undefined}>{linkLabel}</a></li>)}<li><button type="button" onClick={() => void signOut()} disabled={busy}>{busy ? "Signing out…" : "Sign out"}</button></li></ul>
+    <ul>{!isDashboardHome && <li className="dashboard-back-item"><a className="dashboard-back-link" href={dashboardHref}>← Back to dashboard</a></li>}{links.map(({ href, label: linkLabel }) => <li key={href}><a href={href} aria-current={currentPath === href ? "page" : undefined}>{linkLabel}</a></li>)}<li><button type="button" onClick={() => void signOut()} disabled={busy}>{busy ? "Signing out…" : "Sign out"}</button></li></ul>
     {error && <span role="alert">{error}</span>}
   </nav>;
 }

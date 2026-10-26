@@ -16,7 +16,7 @@ export default function Home() {
         <p className="hero-description">A simpler way to connect with your care team, manage appointments and keep your health journey organized.</p>
         <div className="hero-actions">
           <a className="primary-button hero-cta" href="/signup">Create a patient account <span aria-hidden="true">→</span></a>
-          <a className="hero-secondary" href="#care">Explore the platform</a>
+          <a className="hero-secondary" href="/doctors">Browse doctors <span aria-hidden="true">→</span></a>
         </div>
         <div className="hero-note"><span className="note-check" aria-hidden="true">✓</span> Private, secure access to your care</div>
       </div>

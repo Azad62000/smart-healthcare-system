@@ -210,8 +210,15 @@ export function createAuthRouter(repository: AuthRepository, options: AuthRouteO
       if (!challenge || challenge.purpose !== "enroll") throw invalidMfaChallenge();
       const user = await repository.findById(challenge.userId);
       if (!user || user.role !== "Admin" || user.status !== "active") throw invalidMfaChallenge();
-      const secret = createTotpSecret();
-      await mfa.savePendingSecret(user.id, encryptTotpSecret(secret, Buffer.from(key, "hex")));
+      // Keep setup retries stable. If a browser retries this request, do not
+      // replace the seed that is already displayed in the authenticator app.
+      const state = await mfa.getState(user.id);
+      const secret = state?.pendingSecretEncrypted && !state.enabled
+        ? decryptTotpSecret(state.pendingSecretEncrypted, Buffer.from(key, "hex"))
+        : createTotpSecret();
+      if (!state?.pendingSecretEncrypted || state.enabled) {
+        await mfa.savePendingSecret(user.id, encryptTotpSecret(secret, Buffer.from(key, "hex")));
+      }
       response.json({
         success: true,
         data: { secret, otpauthUri: createOtpAuthUri(user.email, secret) },

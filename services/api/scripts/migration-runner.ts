@@ -31,7 +31,8 @@ const baselineMarkers: Record<string, Array<[string, string]>> = {
   "013_messaging_access_audit.sql": [["care_conversation_access_events", "action"]],
   "014_demo_doctors_and_private_documents.sql": [["appointment_documents", "storage_key"], ["doctors", "synthetic_dataset_id"]],
   "015_auth_login_rate_limits.sql": [["auth_login_attempt_limits", "bucket_hash"]],
-  "016_medical_data_encryption.sql": [["care_messages", "encryption_version"], ["appointment_documents", "storage_format"]]
+  "016_medical_data_encryption.sql": [["care_messages", "encryption_version"], ["appointment_documents", "storage_format"]],
+  "017_appointment_feedback.sql": [["appointment_feedback", "rating"], ["appointment_feedback", "comment"]]
 };
 
 export function createMigration(filename: string, sql: string): Migration {

@@ -16,6 +16,8 @@ export interface DoctorProfile {
   consultationModes?: Array<"video" | "in_person">;
   consultationFeeInr?: number | null;
   acceptingAppointments?: boolean;
+  ratingAverage?: number | null;
+  ratingCount?: number;
   approvalStatus: DoctorApprovalStatus;
   availability: DoctorAvailability[];
   createdAt: string;

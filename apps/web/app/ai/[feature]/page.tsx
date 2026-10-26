@@ -1,25 +1,24 @@
 import { notFound } from "next/navigation";
-import { AiFeatureForm } from "../../components/ai-feature-form";
 import { DashboardNav } from "../../components/dashboard-nav";
 
-const definitions: Record<string, { title: string; description: string; fields: Array<{ name: string; label: string; type?: "text" | "number"; placeholder?: string }> }> = {
-  "heart-risk": { title: "Heart disease risk", description: "Provisional input schema for a future integration. No risk score is calculated.", fields: [{ name: "age", label: "Age", type: "number" }, { name: "systolicPressure", label: "Systolic pressure", type: "number" }, { name: "cholesterol", label: "Cholesterol", type: "number" }] },
-  "diabetes-risk": { title: "Diabetes risk", description: "Provisional integration fields only; no clinical assessment is performed.", fields: [{ name: "age", label: "Age", type: "number" }, { name: "bodyMassIndex", label: "Body mass index", type: "number" }, { name: "familyHistory", label: "Family history (optional)", placeholder: "Not configured for analysis" }] },
-  "symptom-checker": { title: "Symptom-based analysis", description: "This interface does not provide a diagnosis or triage recommendation.", fields: [{ name: "symptoms", label: "Symptoms (optional integration input)", placeholder: "Do not enter sensitive details; no service is configured." }] },
-  "general-health-risk": { title: "General health assessment", description: "A future typed integration point. No risk classification is available.", fields: [{ name: "age", label: "Age", type: "number" }, { name: "context", label: "Assessment context", placeholder: "Integration not configured" }] },
-  "medical-image": { title: "Medical image analysis", description: "Image upload and image analysis are not configured; files are not accepted.", fields: [{ name: "imageStatus", label: "Image input", placeholder: "Unavailable until a secure storage and model adapter is configured" }] },
-  "medication-interactions": { title: "Medicine interaction checking", description: "No medication reference data or interaction checker is configured.", fields: [{ name: "medications", label: "Medication names (optional integration input)", placeholder: "No interaction service is configured" }] },
-  "health-trends": { title: "Patient health trends", description: "No longitudinal health analysis is configured.", fields: [{ name: "period", label: "Requested period", placeholder: "No trend service is configured" }] }
+const services: Record<string, { title: string; category: string; description: string }> = {
+  "heart-risk": { title: "Heart health", category: "Risk assessment", description: "No heart health model is currently connected. This service does not collect health information or calculate a risk score." },
+  "diabetes-risk": { title: "Diabetes", category: "Risk assessment", description: "No diabetes risk model is currently connected. No assessment is available." },
+  "symptom-checker": { title: "Symptoms", category: "Health guidance", description: "Automated symptom assessment and triage are not available in this application." },
+  "medical-image": { title: "Medical images", category: "Image analysis", description: "Image upload and analysis are not configured. No files are accepted on this page." },
+  "medication-interactions": { title: "Medicine safety", category: "Interaction checking", description: "A medication reference database and interaction checker are not connected." },
+  "health-trends": { title: "Health trends", category: "Longitudinal view", description: "Longitudinal health analysis is not currently available." }
 };
 
 export default async function AiFeaturePage({ params }: { params: Promise<{ feature: string }> }) {
   const { feature } = await params;
-  const definition = definitions[feature];
-  if (!definition) notFound();
-  return <main className="patient-dashboard">
-    <DashboardNav currentPath="/ai" links={[{ href: "/patient", label: "Overview" }, { href: "/ai", label: "AI services" }, { href: "/patient/appointments", label: "Appointments" }]} />
-    <header className="dashboard-heading"><div><p className="eyebrow">OPTIONAL INTEGRATION</p><h1>{definition.title}</h1><p>{definition.description}</p></div><a className="secondary-button" href="/ai">All AI services</a></header>
-    <AiFeatureForm feature={feature} fields={definition.fields} />
-    <p className="notice notice-info">Experimental interface only. No medical advice, prediction, diagnosis, or treatment recommendation is provided. Consult a qualified healthcare professional.</p>
+  const service = services[feature];
+  if (!service) notFound();
+  return <main className="patient-dashboard ai-workspace">
+    <DashboardNav currentPath="/ai" links={[{ href: "/patient", label: "Overview" }, { href: "/ai", label: "AI services" }, { href: "/patient/appointments", label: "Appointments" }, { href: "/patient/messages", label: "Messages" }]} />
+    <a href="/ai" className="back-link">← All health services</a>
+    <header className="dashboard-heading"><div><p className="eyebrow">{service.category}</p><h1>{service.title}</h1><p>{service.description}</p></div></header>
+    <section className="service-detail-panel dashboard-card"><span className="service-detail-icon" aria-hidden="true">✳</span><div><span className="status-pill">Unavailable</span><h2>This service is not connected</h2><p>Automated health guidance is optional. Your core care tasks are still available through appointments, records, and secure messages.</p><div className="ai-actions"><a className="primary-button" href="/patient/appointments">View appointments</a><a className="secondary-button" href="/patient/messages">Contact care team</a></div></div></section>
+    <p className="notice notice-info ai-disclaimer"><strong>For your safety.</strong> This service does not provide medical advice, diagnosis, or treatment. Contact a qualified clinician about health concerns.</p>
   </main>;
 }

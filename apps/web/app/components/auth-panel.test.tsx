@@ -56,6 +56,7 @@ describe("separate authentication pages", () => {
     fireEvent.click(screen.getByRole("button", { name: "Sign in securely" }));
     fireEvent.click(await screen.findByRole("button", { name: "Set up authenticator" }));
     expect(await screen.findByText("SYNTHETICSETUPKEY")).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Admin authenticator setup QR code" })).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Authenticator code"), { target: { value: "123456" } });
     fireEvent.click(screen.getByRole("button", { name: "Verify and continue" }));
     expect(await screen.findByRole("heading", { name: "Save your recovery codes" })).toBeTruthy();

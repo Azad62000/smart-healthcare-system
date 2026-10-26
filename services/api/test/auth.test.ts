@@ -269,6 +269,9 @@ describe("authentication and authorization", () => {
     const setup = await request(app).post("/api/v1/auth/mfa/setup").set("Cookie", cookie);
     expect(setup.status).toBe(200);
     expect(setup.body.data.otpauthUri).toContain("otpauth://totp/");
+    const retriedSetup = await request(app).post("/api/v1/auth/mfa/setup").set("Cookie", cookie);
+    expect(retriedSetup.status).toBe(200);
+    expect(retriedSetup.body.data.secret).toBe(setup.body.data.secret);
     const code = createTotpCode(setup.body.data.secret).code;
     const verified = await request(app).post("/api/v1/auth/mfa/verify").set("Cookie", cookie).send({ code });
     expect(verified.status).toBe(200);

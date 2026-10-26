@@ -1,12 +1,20 @@
 import type { Pool, PoolClient } from "pg";
 import type { DoctorApprovalStatus, DoctorAvailability, DoctorProfile, DoctorProfileInput, DoctorRepository } from "./types.js";
 
-interface DoctorRow { id: string; user_id: string; given_name: string; family_name: string; specialization: string; qualification: string | null; experience_years: number | null; bio: string | null; approval_status: DoctorApprovalStatus; created_at: Date; updated_at: Date; is_synthetic: boolean; city: string | null; state: string | null; country: string | null; consultation_modes: Array<"video" | "in_person">; consultation_fee_inr: number | null; accepting_appointments: boolean; }
+interface DoctorRow { id: string; user_id: string; given_name: string; family_name: string; specialization: string; qualification: string | null; experience_years: number | null; bio: string | null; approval_status: DoctorApprovalStatus; created_at: Date; updated_at: Date; is_synthetic: boolean; city: string | null; state: string | null; country: string | null; consultation_modes: Array<"video" | "in_person">; consultation_fee_inr: number | null; accepting_appointments: boolean; rating_average?: number | string | null; rating_count?: number; }
 interface SlotRow { id: string; starts_at: Date; ends_at: Date; }
 const doctorColumns = "id, user_id, given_name, family_name, specialization, qualification, experience_years, bio, approval_status, created_at, updated_at, is_synthetic, city, state, country, consultation_modes, consultation_fee_inr, accepting_appointments";
+const publicDoctorColumns = `${doctorColumns},
+  (SELECT round(avg(feedback.rating)::numeric, 1) FROM appointment_feedback feedback WHERE feedback.doctor_id=doctors.id) AS rating_average,
+  (SELECT count(*)::int FROM appointment_feedback feedback WHERE feedback.doctor_id=doctors.id) AS rating_count`;
+
+async function publicColumns(db: Pool): Promise<string> {
+  const result = await db.query<{ available: boolean }>("SELECT to_regclass('public.appointment_feedback') IS NOT NULL AS available");
+  return result.rows[0]?.available ? publicDoctorColumns : doctorColumns;
+}
 
 function mapDoctor(row: DoctorRow, availability: DoctorAvailability[] = []): DoctorProfile {
-  return { id: row.id, userId: row.user_id, givenName: row.given_name, familyName: row.family_name, specialization: row.specialization, qualification: row.qualification, experienceYears: row.experience_years, bio: row.bio, approvalStatus: row.approval_status, isSynthetic: row.is_synthetic, city: row.city, state: row.state, country: row.country, consultationModes: row.consultation_modes, consultationFeeInr: row.consultation_fee_inr, acceptingAppointments: row.accepting_appointments, availability, createdAt: row.created_at.toISOString(), updatedAt: row.updated_at.toISOString() };
+  return { id: row.id, userId: row.user_id, givenName: row.given_name, familyName: row.family_name, specialization: row.specialization, qualification: row.qualification, experienceYears: row.experience_years, bio: row.bio, approvalStatus: row.approval_status, isSynthetic: row.is_synthetic, city: row.city, state: row.state, country: row.country, consultationModes: row.consultation_modes, consultationFeeInr: row.consultation_fee_inr, acceptingAppointments: row.accepting_appointments, ...(row.rating_count !== undefined ? { ratingAverage: row.rating_average === null ? null : Number(row.rating_average), ratingCount: Number(row.rating_count) } : {}), availability, createdAt: row.created_at.toISOString(), updatedAt: row.updated_at.toISOString() };
 }
 function mapSlot(row: SlotRow): DoctorAvailability { return { id: row.id, startsAt: row.starts_at.toISOString(), endsAt: row.ends_at.toISOString() }; }
 
@@ -19,7 +27,8 @@ export class PostgresDoctorRepository implements DoctorRepository {
   constructor(private readonly db: Pool, private readonly allowSynthetic = true) {}
 
   async listApproved(specialization?: string, filters: { city?: string; mode?: "video" | "in_person"; maxFee?: number } = {}): Promise<DoctorProfile[]> {
-    const result = await this.db.query<DoctorRow>(`SELECT ${doctorColumns} FROM doctors WHERE approval_status='approved' AND accepting_appointments=true
+    const columns = await publicColumns(this.db);
+    const result = await this.db.query<DoctorRow>(`SELECT ${columns} FROM doctors WHERE approval_status='approved' AND accepting_appointments=true
       AND ($1::text IS NULL OR lower(specialization)=lower($1))
       AND ($2::text IS NULL OR lower(city)=lower($2))
       AND ($3::text IS NULL OR consultation_modes @> ARRAY[$3]::text[])
@@ -47,7 +56,8 @@ export class PostgresDoctorRepository implements DoctorRepository {
   }
 
   async findPublicById(id: string): Promise<DoctorProfile | undefined> {
-    const result = await this.db.query<DoctorRow>(`SELECT ${doctorColumns} FROM doctors WHERE id=$1 AND approval_status='approved' AND accepting_appointments=true AND ($2::boolean OR is_synthetic=false)`, [id, this.allowSynthetic]);
+    const columns = await publicColumns(this.db);
+    const result = await this.db.query<DoctorRow>(`SELECT ${columns} FROM doctors WHERE id=$1 AND approval_status='approved' AND accepting_appointments=true AND ($2::boolean OR is_synthetic=false)`, [id, this.allowSynthetic]);
     return result.rows[0] && mapDoctor(result.rows[0], await listSlots(this.db, result.rows[0].id));
   }
 

@@ -1,25 +1,13 @@
-"use client";
-
-import { FormEvent, useState } from "react";
 import { DashboardNav } from "../components/dashboard-nav";
-import { apiData } from "../lib/api";
+
+const suggestions = ["How do I book an appointment?", "Where can I find my health records?", "How can I contact my care team?"];
 
 export default function HealthChatPage() {
-  const [message, setMessage] = useState("");
-  const [status, setStatus] = useState("");
-  const [busy, setBusy] = useState(false);
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setBusy(true); setStatus("");
-    try {
-      await apiData("/api/v1/chat/messages", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message }) });
-      setStatus("No chatbot response is available.");
-    } catch (cause) { setStatus(cause instanceof Error ? cause.message : "Chat service is unavailable."); }
-    finally { setBusy(false); }
-  }
-  return <main className="patient-dashboard">
+  return <main className="patient-dashboard ai-workspace">
     <DashboardNav currentPath="/chat" links={[{ href: "/patient", label: "Overview" }, { href: "/patient/records", label: "Health records" }, { href: "/ai", label: "AI services" }, { href: "/chat", label: "Health chat" }]} />
-    <header className="dashboard-heading"><div><p className="eyebrow">OPTIONAL INTEGRATION</p><h1>Health chat</h1><p>Secure chatbot conversations are not enabled for this application.</p></div></header>
-    <section className="dashboard-card"><p className="notice notice-info" role="status">No chatbot service is configured. Messages are not sent or stored, and this page does not provide medical advice.</p><div className="chat-empty"><h2>Chat unavailable</h2><p>A chat provider must be configured before a conversation can start.</p></div><form className="profile-form" onSubmit={(event) => void submit(event)}><label htmlFor="chat-message">Message</label><textarea id="chat-message" value={message} onChange={(event) => setMessage(event.target.value)} maxLength={4000} required rows={3} /><button className="primary-button" type="submit" disabled={busy || !message.trim()}>{busy ? "Checking…" : "Check chat availability"}</button></form>{status && <p role="alert" className="notice notice-error">{status}</p>}</section>
+    <header className="dashboard-heading"><div><p className="eyebrow">PATIENT SUPPORT</p><h1>Health assistant</h1><p>Find the right place in your care workspace.</p></div><span className="service-indicator"><i /> Assistant offline</span></header>
+    <section className="assistant-panel dashboard-card" aria-labelledby="assistant-title"><div className="assistant-topline"><div className="assistant-avatar" aria-hidden="true">✳</div><div><h2 id="assistant-title">How can we help?</h2><p>Smart Healthcare assistant</p></div></div><div className="assistant-conversation"><div className="assistant-message"><p>The automated assistant is not available right now. These quick links can help you continue with your care.</p></div><div className="suggestion-list" aria-label="Suggested tasks">{suggestions.map((suggestion, index) => <a href={["/patient/appointments", "/patient/records", "/patient/messages"][index]} key={suggestion}>{suggestion}<span aria-hidden="true">↗</span></a>)}</div></div><div className="assistant-composer"><label className="sr-only" htmlFor="assistant-input">Message</label><textarea id="assistant-input" rows={2} disabled placeholder="Assistant currently unavailable" aria-describedby="assistant-note" /><button type="button" className="primary-button" disabled aria-label="Send message">↑</button><p id="assistant-note">Messages are not sent or stored while the assistant is unavailable.</p></div></section>
+    <p className="notice notice-info ai-disclaimer"><strong>Health information matters.</strong> This assistant is for general guidance only and does not replace care from a qualified clinician. Do not use it for urgent medical concerns.</p>
+    <section className="care-contact-strip"><div><span aria-hidden="true">◉</span><div><strong>Need help with your care?</strong><p>Contact your care team directly through secure messaging.</p></div></div><a className="secondary-button" href="/patient/messages">Open secure messages</a></section>
   </main>;
 }

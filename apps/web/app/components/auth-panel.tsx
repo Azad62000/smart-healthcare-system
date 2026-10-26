@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { QRCodeSVG } from "qrcode.react";
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 type AuthMode = "signin" | "signup";
@@ -199,7 +200,7 @@ export function AuthPanel({ mode }: { mode: AuthMode }) {
           <h2 id="account-title">{enrollmentRequired ? "Secure your Admin account" : "Verify it’s you"}</h2>
           <p className="auth-intro">{enrollmentRequired ? "Admin accounts must enroll an authenticator before accessing the dashboard." : "Enter the 6-digit code from your authenticator app, or use a recovery code."}</p>
           {enrollmentRequired && !mfaSetup ? <button className="primary-button auth-submit" type="button" disabled={busy} onClick={() => void startMfaSetup()}>{busy ? "Preparing setup…" : "Set up authenticator"}</button> : <>
-            {mfaSetup && <section className="mfa-setup-instructions"><p>Add this account manually in an authenticator app using this setup key:</p><p><code>{mfaSetup.secret}</code></p><details><summary>Show setup URI</summary><code>{mfaSetup.otpauthUri}</code></details></section>}
+            {mfaSetup && <section className="mfa-setup-instructions"><p>Scan this QR code with your authenticator app. If scanning is unavailable, enter the setup key manually.</p><div className="mfa-qr-code"><QRCodeSVG value={mfaSetup.otpauthUri} size={192} level="M" includeMargin aria-label="Admin authenticator setup QR code" /></div><p className="mfa-setup-key-label">Manual setup key</p><p><code>{mfaSetup.secret}</code></p><p className="mfa-setup-help">Use a time-based code with 6 digits and a 30-second interval.</p></section>}
             <form onSubmit={verifyMfa}>
               <label>{enrollmentRequired ? "Authenticator code" : "Authenticator or recovery code"}<input value={verificationCode} onChange={(event) => setVerificationCode(event.target.value)} autoComplete="one-time-code" inputMode="text" maxLength={32} required /></label>
               {error && <p className="auth-error" role="alert">{error}</p>}

@@ -247,7 +247,7 @@ export class PostgresChatRepository implements ChatRepository {
         [messageId, input.conversationId, user.id, input.clientMessageId, encryptedBody]
       );
       const duplicate = inserted.rows.length === 0;
-      const messageQuery = `SELECT m.id,m.sequence::text,m.conversation_id,m.sender_user_id,m.client_message_id,m.body,
+      const messageQuery = `SELECT m.id,m.sequence::text,m.conversation_id,m.sender_user_id,m.client_message_id,m.body,m.encryption_version,
           u.role AS sender_role,
           CASE WHEN u.role='Doctor' THEN d.given_name || ' ' || d.family_name
                ELSE p.given_name || ' ' || p.family_name END AS sender_name,

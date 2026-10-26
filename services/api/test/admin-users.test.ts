@@ -10,14 +10,14 @@ import { ApiRequestError } from "../src/request-error.js";
 import { errorHandler } from "../src/middleware/error-handler.js";
 import { requestIdMiddleware } from "../src/middleware/request-id.js";
 
-type ManagedUser = { id: string; email: string; role: UserRole; status: "active" | "inactive" | "locked"; createdAt: string };
+type ManagedUser = { id: string; email: string; role: UserRole; status: "active" | "inactive" | "locked"; createdAt: string; patientProfileComplete?: boolean; doctorApprovalStatus?: string | null };
 
 class AdminFixture implements AuthRepository, AdminUserRepository {
   users = new Map<string, ManagedUser>();
   sessions = new Map<string, string>();
   auditEvents: Array<{ actorId: string; targetId: string; before: string; after: string; requestId: string }> = [];
   async addUser(id: string, role: UserRole, status: ManagedUser["status"] = "active") {
-    const user = { id, email: `${id}@example.test`, role, status, createdAt: "2030-01-01T00:00:00.000Z" };
+    const user = { id, email: `${id}@example.test`, role, status, createdAt: "2030-01-01T00:00:00.000Z", patientProfileComplete: role === "Patient", doctorApprovalStatus: role === "Doctor" ? "pending" : null };
     this.users.set(id, user);
     return user;
   }
@@ -33,12 +33,16 @@ class AdminFixture implements AuthRepository, AdminUserRepository {
   async createSession(userId: string) { const token = `session-${userId}`; this.sessions.set(token, userId); return token; }
   async findSession(token: string) { return this.findById(this.sessions.get(token) ?? ""); }
   async deleteSession(token: string) { this.sessions.delete(token); }
-  async list(filters: { search?: string; role?: UserRole; status?: ManagedUser["status"] }) {
-    return [...this.users.values()].filter((user) =>
+  async list(filters: { search?: string; role?: UserRole; status?: ManagedUser["status"]; patientProfileComplete?: boolean; doctorApprovalStatus?: string; page: number; pageSize: number }) {
+    const matches = [...this.users.values()].filter((user) =>
       (!filters.search || user.email.toLowerCase().includes(filters.search.toLowerCase())) &&
       (!filters.role || user.role === filters.role) &&
-      (!filters.status || user.status === filters.status)
+      (!filters.status || user.status === filters.status) &&
+      (filters.patientProfileComplete === undefined || user.patientProfileComplete === filters.patientProfileComplete) &&
+      (!filters.doctorApprovalStatus || user.doctorApprovalStatus === filters.doctorApprovalStatus)
     );
+    const offset = (filters.page - 1) * filters.pageSize;
+    return { users: matches.slice(offset, offset + filters.pageSize), pagination: { page: filters.page, pageSize: filters.pageSize, total: matches.length, totalPages: Math.ceil(matches.length / filters.pageSize) } };
   }
   async setStatus(id: string, status: ManagedUser["status"], actorId: string, _requestId: string) {
     if (id === actorId && status !== "active") {
@@ -80,6 +84,7 @@ describe("Admin user management", () => {
     expect(response.status).toBe(200);
     expect(response.body.data.users).toHaveLength(1);
     expect(response.body.data.users[0]).toMatchObject({ id: "patient", role: "Patient", status: "active" });
+    expect(response.body.data.pagination).toMatchObject({ page: 1, pageSize: 25, total: 1, totalPages: 1 });
     expect(JSON.stringify(response.body)).not.toMatch(/password|token/i);
   });
 
@@ -92,6 +97,17 @@ describe("Admin user management", () => {
     const lastAdmin = await new AdminUserService(fixture).setStatus(adminId, "inactive", { id: "other-admin", email: "other@example.test", role: "Admin", status: "active" }, "request-id")
       .then(() => undefined, (error: { code?: string }) => error.code);
     expect(lastAdmin).toBe("LAST_ACTIVE_ADMIN");
+  });
+
+  it("paginates and filters Admin account records", async () => {
+    await fixture.addUser("admin", "Admin");
+    await fixture.addUser("patient-one", "Patient");
+    await fixture.addUser("patient-two", "Patient");
+    const token = await fixture.createSession("admin");
+    const response = await request(app).get("/api/v1/admin/users?role=Patient&patientProfileComplete=true&page=2&pageSize=1").set("Cookie", `session=${token}`);
+    expect(response.status).toBe(200);
+    expect(response.body.data.users).toHaveLength(1);
+    expect(response.body.data.pagination).toMatchObject({ page: 2, pageSize: 1, total: 2, totalPages: 2 });
   });
 
   it("updates account status and records the authenticated actor and request ID", async () => {

@@ -6,6 +6,26 @@ The Smart Healthcare System is a web-first application for coordinating patient,
 
 This document describes the implemented system and its remaining planned scope. The current repository includes the Next.js Patient and Doctor workspaces, Express API modules, PostgreSQL persistence, server-side session authorization, appointment-linked teleconsultations, consultation notes, persistent Patient–Doctor messaging, private appointment documents, and opt-in doctor recommendations using clearly labeled synthetic profiles. Historical implementation-log entries below preserve the status recorded when each earlier phase was completed.
 
+### Current feature status
+
+Statuses below describe repository implementation, not production readiness. Provider-dependent features require the corresponding environment configuration; migrations and external integrations must be verified in the target environment.
+
+| Area | Status | Repository evidence / boundary |
+| --- | --- | --- |
+| Auth | Implemented; integrations configuration-dependent | Password/session routes, Patient email-code workflows, Admin TOTP MFA, OAuth routes, and PostgreSQL login throttling exist. SMTP and Google/Apple provider setup are required for their flows. Phone OTP and self-service Admin MFA recovery are not implemented. |
+| Patient | Implemented | Patient profile, appointments, records, prescriptions, reports, notifications, documents, and messaging are present in the web app/API. Pagination is not consistent across all Patient collections. |
+| Doctor | Implemented; credential verification partial | Profile, Admin approval, availability, appointment queue/status, care records, prescriptions, messaging, and consultation workflows exist. Professional license verification is outside current functionality. |
+| Appointment | Implemented | Patient booking, Doctor appointment lifecycle, and Admin scheduling/list/reschedule/cancel routes exist. Availability is rechecked and database exclusion constraints protect active appointment overlaps. Availability/recommendation results do not reserve slots. |
+| Health records | Implemented; encryption coverage partial | Patient/Doctor relationship-scoped record operations and access audits exist. Application-level encryption covers new messages and private document files, not every clinical record or prescription field. |
+| Notifications | Partial | Durable in-app appointment notifications are recipient-scoped and markable as read. Listing is capped at 100 and unread count is calculated from that page; high unread volumes can be undercounted. Email/SMS delivery is future work. |
+| Admin | Implemented | Analytics, doctor review, account-status controls, MFA, paginated account/appointment record views, and manual scheduling exist. Complete Admin browser workflow verification remains unrecorded. |
+| Messaging | Implemented | Patient–Doctor REST/Socket.IO messaging persists messages, enforces care-relationship authorization, supports cursor pagination/read cursors/idempotency, and audits access metadata. The separate general `/chat` AI placeholder is unavailable. |
+| Video | Configuration-dependent | Appointment-linked LiveKit token and consultation lifecycle code/UI exist; calls require LiveKit settings. Join timestamps are client-reported, not provider-verified. |
+| AI | Future / unavailable | Prediction endpoint is an explicit unavailable response; no inference provider is configured and no results are generated. Optional doctor recommendations are rule-based directory matching, not clinical AI. |
+| Mobile and deployment scaling | Future work | Native mobile, cloud deployment, containers/orchestration, independent deployment of service modules, and autoscaling are report-only future scope. |
+
+The status inventory was checked against route/service modules under `services/api/src`, web routes under `apps/web/app`, migration files `001`–`016`, and API, UI, and end-to-end test sources. This is repository evidence only: it does not verify the migration ledger or provider availability in any running environment.
+
 ### Functional requirements
 
 1. **Authentication and user management:** authenticate users, manage accounts, and assign server-controlled roles.
@@ -100,9 +120,11 @@ flowchart LR
 | Doctor management | Clinician profile, specialty, availability | Only authorized administrators manage clinician identity; clinicians manage permitted profile/availability fields |
 | Doctor recommendation | Stateless filtering and ranking of approved profiles by optional specialty, city, consultation mode, budget, and time window | Patient-only endpoint; explains matching filters and earliest slot, labels synthetic profiles, and does not assess clinical suitability |
 | Appointment management | Appointment lifecycle, participants, status, scheduling rules | A participant sees only appointments they are allowed to access; staff actions are scoped and audited |
+| Appointment feedback | One patient-authored 1–5 star rating and bounded comment per completed appointment; public doctor profiles receive aggregates only | Only the owning authenticated Patient can submit; private feedback listing is patient-scoped and comments are never part of public doctor responses |
 | Patient–Doctor messaging | Care conversations, durable messages, pagination, idempotent send, and per-participant read cursors | Every REST action and realtime subscription/send/read is restricted to the authenticated Patient or assigned Doctor with a confirmed/completed appointment; Admin access is not granted by default |
 | Appointment documents | Private document bytes and appointment-scoped metadata, listing, download, deletion, and metadata-only access audit | Only the appointment Patient or assigned Doctor may access; Admins are denied; deletion is limited to the uploader before the appointment starts |
 | EHR | Clinical notes, diagnoses, medications, and record metadata as phased in | Patient and clinician relationship plus granted role determine access; sensitive reads and writes are auditable |
+| Prescriptions | Doctor-issued medication details linked to a patient and qualifying appointment | Only the approved assigned Doctor can create; Patient and authorized Doctor reads are relationship-scoped and audited |
 | Notifications | In-app appointment event notifications and per-user read state | Recipients come from appointment participants; users can list and mark read only their own notifications |
 | Analytics | Aggregated operational reporting | Reports are role-scoped and minimize or de-identify patient data where individual identity is unnecessary |
 
@@ -296,6 +318,14 @@ The `notifications` table uses a unique `(recipient_user_id, event_key)` constra
 - `GET /api/v1/analytics/overview` — active Admin only. Authorization uses the role resolved from the server-side session. The response contains patient profile count, approved doctor count, total appointments, counts by status, future booked appointments awaiting confirmation, future booked/confirmed appointments, and `generatedAt`.
 - Queries use aggregate counts only and do not select patient/doctor identifiers or clinical record fields. The existing `/admin` dashboard renders the metrics and appointment status table. Synthetic fixture tests cover calculations in the service response and unauthenticated/non-Admin denials.
 
+### Admin appointment scheduling and records
+
+- `GET /api/v1/admin/appointments/availability` — active Admin only. Requires an interval and appointment type; optional filters cover specialization, city, minimum experience, and maximum fee. Results distinguish available doctors from doctors outside published availability, doctors not accepting appointments, and doctors with an overlapping active appointment. Busy results include the conflicting time and patient display name for operational scheduling.
+- `GET /api/v1/admin/appointments` — active Admin only; supports `page`, `pageSize` (1–100, default 25), `view=all|pending|upcoming`, status, and ISO `from`/`to` range filters. The result includes page metadata and only the requested appointments.
+- `GET /api/v1/admin/users` — active Admin only; supports the same bounded page controls plus email search, role, account status, patient-profile-complete, and doctor-approval filters. Results include only account/profile metadata needed by the Admin lists.
+- Admin appointment creation and rescheduling recheck the doctor's published availability and supported mode. PostgreSQL's exclusion constraints remain the final guard against overlapping patient/doctor bookings under concurrent requests.
+- Admin overview metric buttons open paginated, filtered account or appointment records. Patient and doctor rows, appointment rows, and account-list rows open a styled detail view. Patient rows contain account/profile metadata rather than clinical records; clinical record authorization remains separate. Offset pagination has a maximum page size of 100; cursor pagination remains a performance upgrade for very large datasets.
+
 - Prefix versioned business endpoints with `/api/v1`; retain `/health` as an operational liveness endpoint.
 - Use resource-oriented nouns and standard HTTP methods/status codes. Use ISO-8601 UTC timestamps and opaque identifiers.
 - Validate path, query, and body data at the boundary. Reject invalid fields rather than silently accepting client authority fields such as roles or ownership IDs.
@@ -368,6 +398,8 @@ The Patient Service owns the `patients` profile row linked one-to-one to `users.
 - Guarded PostgreSQL messaging tests verify persistence, participant authorization, deduplication, pagination, read cursors, and metadata-only audits. They do not replace a signed-in Patient/Doctor browser exchange.
 - The mocked browser suite covers dashboard and selected appointment/consultation UI paths. Separate live browser checks with existing synthetic Patient/Doctor fixtures verified role-scoped reads, recommendations, booking/cancellation, messaging, documents, and logout. The opt-in self-registration scenario still returns `503` because SMTP is not configured, so new-account verification and a second newly registered Patient remain unverified. Admin workflow stops at MFA enrollment; no Admin security state was changed.
 - Message rate limiting is in-memory and per API process. It is not a distributed limiter; multi-process deployments need a shared rate-limit store.
+- Notification reads return at most 100 recent rows and the current unread count is calculated from those rows, so it can undercount a larger unread backlog. Email/SMS appointment delivery is not implemented. Pagination is also not implemented consistently across every Patient/Doctor collection; high-volume collections should be paginated before larger deployments.
+- Doctor profile approval is an administrative workflow, not professional-license verification. A production onboarding process still needs an appropriate identity and credential verification policy.
 - New message writes and private document uploads are AES-256-GCM encrypted at the application layer; legacy plaintext remains readable until the explicit conversion utility runs. This is not E2EE, and a server holding configured keys can decrypt the content. Protect keys separately from database/file backups, test key recovery, and plan a forward-compatible rollback before encrypted writes are deployed.
 - Migration 016 only changes schema metadata and message envelope capacity; it does not convert existing content. The conversion/rotation utility is report-only by default and requires a verified backup acknowledgement to apply. PostgreSQL/disk/backup encryption-at-rest, retention automation, and deployment-specific private storage controls remain separate operational responsibilities. Prescription drafting/finalization remains outside this implementation. Optional AI/chatbot integrations remain unconfigured.
 - Doctor recommendations remain disabled by default. Their stateless implementation queries availability for approved profiles individually (up to 100 directory entries); a larger directory may warrant a batched availability query. A suggested slot can be booked by another patient before selection; transactional booking validation remains authoritative.
