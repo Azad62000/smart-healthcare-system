@@ -15,10 +15,10 @@ export default async function AiFeaturePage({ params }: { params: Promise<{ feat
   const service = services[feature];
   if (!service) notFound();
   return <main className="patient-dashboard ai-workspace">
-    <DashboardNav currentPath="/ai" links={[{ href: "/patient", label: "Overview" }, { href: "/ai", label: "AI services" }, { href: "/patient/appointments", label: "Appointments" }, { href: "/patient/messages", label: "Messages" }]} />
+    <DashboardNav currentPath="/ai" links={[{ href: "/patient", label: "Overview" }, { href: "/ai", label: "AI services" }, { href: "/patient/appointments", label: "Appointments" }]} />
     <a href="/ai" className="back-link">← All health services</a>
     <header className="dashboard-heading"><div><p className="eyebrow">{service.category}</p><h1>{service.title}</h1><p>{service.description}</p></div></header>
-    <section className="service-detail-panel dashboard-card"><span className="service-detail-icon" aria-hidden="true">✳</span><div><span className="status-pill">Unavailable</span><h2>This service is not connected</h2><p>Automated health guidance is optional. Your core care tasks are still available through appointments, records, and secure messages.</p><div className="ai-actions"><a className="primary-button" href="/patient/appointments">View appointments</a><a className="secondary-button" href="/patient/messages">Contact care team</a></div></div></section>
+    <section className="service-detail-panel dashboard-card"><span className="service-detail-icon" aria-hidden="true">✳</span><div><span className="status-pill">Unavailable</span><h2>This service is not connected</h2><p>Automated health guidance is optional. Your core care tasks are still available through appointments and records. Chat with your care team during video consultations.</p><div className="ai-actions"><a className="primary-button" href="/patient/appointments">View appointments</a></div></div></section>
     <p className="notice notice-info ai-disclaimer"><strong>For your safety.</strong> This service does not provide medical advice, diagnosis, or treatment. Contact a qualified clinician about health concerns.</p>
   </main>;
 }

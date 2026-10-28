@@ -5,7 +5,7 @@ import type { Pool } from "pg";
 export type UserRole = "Patient" | "Doctor" | "Admin";
 export type UserStatus = "active" | "inactive" | "locked";
 export interface UserRecord { id: string; email: string; password_hash: string; role: UserRole; status: UserStatus; email_verified?: boolean }
-export interface PublicUser { id: string; email: string; role: UserRole; status: UserStatus }
+export interface PublicUser { id: string; email: string; role: UserRole; status: UserStatus; email_verified?: boolean }
 export interface AuthRepository {
   createPatient(email: string, password: string): Promise<PublicUser>;
   findByEmail(email: string): Promise<UserRecord | undefined>;
@@ -37,7 +37,7 @@ export class PostgresAuthRepository implements AuthRepository {
   }
 
   async findById(id: string): Promise<PublicUser | undefined> {
-    const { rows } = await this.db.query<PublicUser>("SELECT id, email, role, status FROM users WHERE id = $1", [id]);
+    const { rows } = await this.db.query<PublicUser>("SELECT id, email, role, status, email_verified FROM users WHERE id = $1", [id]);
     return rows[0];
   }
 

@@ -3,7 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { Pool } from "pg";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { config } from "../src/config.js";
-import { documentAdditionalData, MedicalDataCrypto, messageAdditionalData } from "../src/medical-data-crypto.js";
+import { clinicalDataAdditionalData, documentAdditionalData, MedicalDataCrypto, messageAdditionalData } from "../src/medical-data-crypto.js";
 import type { DocumentMediaType } from "../src/documents/types.js";
 import { createMigration, schemaAndMedicalDataLockId } from "./migration-runner.js";
 
@@ -32,6 +32,10 @@ interface MessageRow {
   sender_user_id: string;
   body: string;
 }
+
+interface RecordRow { id: string; patient_id: string; doctor_id: string; note: string; diagnosis: string | null; }
+interface PrescriptionRow { id: string; patient_id: string; doctor_id: string; medication_name: string; dosage: string; route: string; frequency: string; duration_days: number; instructions: string | null; }
+interface DraftRow { appointment_id: string; patient_id: string; doctor_id: string; summary: string; symptoms: string | null; observations: string | null; assessment: string | null; follow_up: string | null; internal_notes: string | null; }
 
 export interface DocumentRow {
   id: string;
@@ -73,19 +77,17 @@ function assertLocalDatabase() {
 }
 
 export async function assertMedicalDataMigrationApplied(pool: Pool): Promise<void> {
-  const migrationPath = join(apiDirectory, "migrations", "016_medical_data_encryption.sql");
-  const migration = createMigration("016_medical_data_encryption.sql", await readFile(migrationPath, "utf8"));
-  const { rows } = await pool.query<{ checksum: string }>(
-    "SELECT checksum FROM public.app_schema_migrations WHERE filename=$1",
-    [migration.filename]
-  );
-  if (rows[0]?.checksum !== migration.checksum) {
-    throw new SafeMigrationError("Migration 016 is not recorded with the current checksum; run the reviewed schema migration process first.");
+  for (const filename of ["016_medical_data_encryption.sql", "022_clinical_data_encryption.sql"]) {
+    const migration = createMigration(filename, await readFile(join(apiDirectory, "migrations", filename), "utf8"));
+    const { rows } = await pool.query<{ checksum: string }>("SELECT checksum FROM public.app_schema_migrations WHERE filename=$1", [filename]);
+    if (rows[0]?.checksum !== migration.checksum) {
+      throw new SafeMigrationError(`Migration ${filename.slice(0, 3)} is not recorded with the current checksum; run the reviewed schema migration process first.`);
+    }
   }
 }
 
 export async function report(pool: Pool, dryRun = !apply, output: NodeJS.WritableStream = process.stdout) {
-  const [messages, documents] = await Promise.all([
+  const [messages, documents, records, prescriptions, drafts] = await Promise.all([
     pool.query<{ legacy: string; encrypted: string }>(
       `SELECT count(*) FILTER (WHERE encryption_version=0)::text AS legacy,
               count(*) FILTER (WHERE encryption_version=1)::text AS encrypted
@@ -94,9 +96,15 @@ export async function report(pool: Pool, dryRun = !apply, output: NodeJS.Writabl
     pool.query<{ format: string; deleted: boolean; count: string }>(
       `SELECT storage_format AS format,(deleted_at IS NOT NULL) AS deleted,count(*)::text AS count
        FROM appointment_documents GROUP BY storage_format,(deleted_at IS NOT NULL)`
-    )
+    ),
+    pool.query<{ legacy: string; encrypted: string }>("SELECT count(*) FILTER (WHERE encryption_version=0)::text AS legacy,count(*) FILTER (WHERE encryption_version=1)::text AS encrypted FROM consultation_records"),
+    pool.query<{ legacy: string; encrypted: string }>("SELECT count(*) FILTER (WHERE encryption_version=0)::text AS legacy,count(*) FILTER (WHERE encryption_version=1)::text AS encrypted FROM prescriptions"),
+    pool.query<{ legacy: string; encrypted: string }>("SELECT count(*) FILTER (WHERE encryption_version=0)::text AS legacy,count(*) FILTER (WHERE encryption_version=1)::text AS encrypted FROM consultation_note_drafts")
   ]);
   output.write(`Messages: ${messages.rows[0]?.legacy ?? "0"} plaintext, ${messages.rows[0]?.encrypted ?? "0"} encrypted.\n`);
+  output.write(`Clinical records: ${records.rows[0]?.legacy ?? "0"} plaintext, ${records.rows[0]?.encrypted ?? "0"} encrypted.\n`);
+  output.write(`Prescriptions: ${prescriptions.rows[0]?.legacy ?? "0"} plaintext, ${prescriptions.rows[0]?.encrypted ?? "0"} encrypted.\n`);
+  output.write(`Consultation drafts: ${drafts.rows[0]?.legacy ?? "0"} plaintext, ${drafts.rows[0]?.encrypted ?? "0"} encrypted.\n`);
   const totals = new Map<string, number>();
   for (const row of documents.rows) {
     const key = `${row.format}${row.deleted ? " (soft-deleted)" : ""}`;
@@ -109,6 +117,9 @@ export async function report(pool: Pool, dryRun = !apply, output: NodeJS.Writabl
       "SELECT count(*)::text AS count FROM care_messages WHERE encryption_version=1 AND split_part(body,'.',2)<>$1",
       [crypto.activeKeyId]
     );
+    const oldRecords = await pool.query<{ count: string }>("SELECT count(*)::text AS count FROM consultation_records WHERE encryption_version=1 AND split_part(note,'.',2)<>$1", [crypto.activeKeyId]);
+    const oldPrescriptions = await pool.query<{ count: string }>("SELECT count(*)::text AS count FROM prescriptions WHERE encryption_version=1 AND split_part(medication_name,'.',2)<>$1", [crypto.activeKeyId]);
+    const oldDrafts = await pool.query<{ count: string }>("SELECT count(*)::text AS count FROM consultation_note_drafts WHERE encryption_version=1 AND split_part(summary,'.',2)<>$1", [crypto.activeKeyId]);
     let oldDocuments = 0;
     let verifiedDocuments = 0;
     let cursor = "";
@@ -134,7 +145,8 @@ export async function report(pool: Pool, dryRun = !apply, output: NodeJS.Writabl
       }
     }
     output.write(
-      `Rotation candidates by key ID: ${oldMessages.rows[0]?.count ?? "0"} messages, ${oldDocuments} documents using non-active keys; ` +
+      `Rotation candidates by key ID: ${oldMessages.rows[0]?.count ?? "0"} messages, ${oldRecords.rows[0]?.count ?? "0"} records, ` +
+      `${oldPrescriptions.rows[0]?.count ?? "0"} prescriptions, ${oldDrafts.rows[0]?.count ?? "0"} consultation drafts, ${oldDocuments} documents using non-active keys; ` +
       `${verifiedDocuments} encrypted document files authenticated.\n`
     );
   }
@@ -212,6 +224,126 @@ export async function rotateMessageBatches(pool: Pool, encryption = crypto, size
     }
   }
   return converted;
+}
+
+export async function encryptClinicalDataBatches(pool: Pool, encryption = crypto, size = batchSize) {
+  let recordsConverted = 0;
+  while (true) {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows } = await client.query<RecordRow>(
+        "SELECT id,patient_id,doctor_id,note,diagnosis FROM consultation_records WHERE encryption_version=0 ORDER BY id LIMIT $1 FOR UPDATE",
+        [size]
+      );
+      if (!rows.length) { await client.query("COMMIT"); break; }
+      for (const row of rows) {
+        const payload = encryption.encryptText(JSON.stringify({ note: row.note, diagnosis: row.diagnosis }), clinicalDataAdditionalData("record", row.id, row.patient_id, row.doctor_id));
+        await client.query("UPDATE consultation_records SET note=$2,diagnosis=NULL,encryption_version=1 WHERE id=$1 AND encryption_version=0", [row.id, payload]);
+      }
+      await client.query("COMMIT");
+      recordsConverted += rows.length;
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
+  }
+
+  let prescriptionsConverted = 0;
+  while (true) {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows } = await client.query<PrescriptionRow>(
+        `SELECT id,patient_id,doctor_id,medication_name,dosage,route,frequency,duration_days,instructions
+         FROM prescriptions WHERE encryption_version=0 ORDER BY id LIMIT $1 FOR UPDATE`, [size]
+      );
+      if (!rows.length) { await client.query("COMMIT"); break; }
+      for (const row of rows) {
+        const payload = encryption.encryptText(JSON.stringify({ medicationName: row.medication_name, dosage: row.dosage, route: row.route, frequency: row.frequency, durationDays: row.duration_days, instructions: row.instructions }), clinicalDataAdditionalData("prescription", row.id, row.patient_id, row.doctor_id));
+        await client.query("UPDATE prescriptions SET medication_name=$2,dosage='encrypted',route='encrypted',frequency='encrypted',duration_days=1,instructions=NULL,encryption_version=1 WHERE id=$1 AND encryption_version=0", [row.id, payload]);
+      }
+      await client.query("COMMIT");
+      prescriptionsConverted += rows.length;
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
+  }
+
+  let draftsConverted = 0;
+  while (true) {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows } = await client.query<DraftRow>(
+        `SELECT appointment_id,patient_id,doctor_id,summary,symptoms,observations,assessment,follow_up,internal_notes
+         FROM consultation_note_drafts WHERE encryption_version=0 ORDER BY appointment_id LIMIT $1 FOR UPDATE`, [size]
+      );
+      if (!rows.length) { await client.query("COMMIT"); break; }
+      for (const row of rows) {
+        const payload = encryption.encryptText(JSON.stringify({ summary: row.summary, symptoms: row.symptoms, observations: row.observations, assessment: row.assessment, followUp: row.follow_up, internalNotes: row.internal_notes }), clinicalDataAdditionalData("consultation-draft", row.appointment_id, row.patient_id, row.doctor_id));
+        await client.query("UPDATE consultation_note_drafts SET summary=$2,symptoms=NULL,observations=NULL,assessment=NULL,follow_up=NULL,internal_notes=NULL,encryption_version=1 WHERE appointment_id=$1 AND encryption_version=0", [row.appointment_id, payload]);
+      }
+      await client.query("COMMIT");
+      draftsConverted += rows.length;
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
+  }
+  return { records: recordsConverted, prescriptions: prescriptionsConverted, drafts: draftsConverted };
+}
+
+export async function rotateClinicalDataBatches(pool: Pool, encryption = crypto, size = batchSize) {
+  let rotatedRecords = 0;
+  while (true) {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows } = await client.query<RecordRow>("SELECT id,patient_id,doctor_id,note,diagnosis FROM consultation_records WHERE encryption_version=1 AND split_part(note,'.',2)<>$1 ORDER BY id LIMIT $2 FOR UPDATE", [encryption.activeKeyId, size]);
+      if (!rows.length) { await client.query("COMMIT"); break; }
+      for (const row of rows) {
+        const aad = clinicalDataAdditionalData("record", row.id, row.patient_id, row.doctor_id);
+        const value = JSON.parse(encryption.decryptText(row.note, aad, true)) as { note: string; diagnosis: string | null };
+        await client.query("UPDATE consultation_records SET note=$2 WHERE id=$1", [row.id, encryption.encryptText(JSON.stringify(value), aad)]);
+      }
+      await client.query("COMMIT");
+      rotatedRecords += rows.length;
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
+  }
+
+  let rotatedPrescriptions = 0;
+  while (true) {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows } = await client.query<PrescriptionRow>("SELECT id,patient_id,doctor_id,medication_name,dosage,route,frequency,duration_days,instructions FROM prescriptions WHERE encryption_version=1 AND split_part(medication_name,'.',2)<>$1 ORDER BY id LIMIT $2 FOR UPDATE", [encryption.activeKeyId, size]);
+      if (!rows.length) { await client.query("COMMIT"); break; }
+      for (const row of rows) {
+        const aad = clinicalDataAdditionalData("prescription", row.id, row.patient_id, row.doctor_id);
+        const value = JSON.parse(encryption.decryptText(row.medication_name, aad, true));
+        await client.query("UPDATE prescriptions SET medication_name=$2 WHERE id=$1", [row.id, encryption.encryptText(JSON.stringify(value), aad)]);
+      }
+      await client.query("COMMIT");
+      rotatedPrescriptions += rows.length;
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
+  }
+
+  let rotatedDrafts = 0;
+  while (true) {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows } = await client.query<DraftRow>("SELECT appointment_id,patient_id,doctor_id,summary,symptoms,observations,assessment,follow_up,internal_notes FROM consultation_note_drafts WHERE encryption_version=1 AND split_part(summary,'.',2)<>$1 ORDER BY appointment_id LIMIT $2 FOR UPDATE", [encryption.activeKeyId, size]);
+      if (!rows.length) { await client.query("COMMIT"); break; }
+      for (const row of rows) {
+        const aad = clinicalDataAdditionalData("consultation-draft", row.appointment_id, row.patient_id, row.doctor_id);
+        const value = JSON.parse(encryption.decryptText(row.summary, aad, true));
+        await client.query("UPDATE consultation_note_drafts SET summary=$2 WHERE appointment_id=$1", [row.appointment_id, encryption.encryptText(JSON.stringify(value), aad)]);
+      }
+      await client.query("COMMIT");
+      rotatedDrafts += rows.length;
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
+  }
+  return { records: rotatedRecords, prescriptions: rotatedPrescriptions, drafts: rotatedDrafts };
 }
 
 export async function convertDocument(
@@ -374,14 +506,16 @@ async function main() {
     if (!apply) return;
     if (rotate) {
       const messages = await rotateMessageBatches(pool);
+      const clinical = await rotateClinicalDataBatches(pool);
       const documents = await rotateDocumentBatches(pool);
-      process.stdout.write(`Rotated ${messages} messages and ${documents} documents to active key ${crypto.activeKeyId}.\n`);
+      process.stdout.write(`Rotated ${messages} messages, ${clinical.records} records, ${clinical.prescriptions} prescriptions, ${clinical.drafts} consultation drafts, and ${documents} documents to active key ${crypto.activeKeyId}.\n`);
       return;
     }
     const messages = await encryptMessageBatches(pool);
+    const clinical = await encryptClinicalDataBatches(pool);
     const documents = await encryptDocumentBatches(pool);
     const cleanedDocuments = await resumeDocumentCleanup(pool);
-    process.stdout.write(`Converted ${messages} messages and ${documents} documents; removed ${cleanedDocuments} verified legacy document files.\n`);
+    process.stdout.write(`Converted ${messages} messages, ${clinical.records} records, ${clinical.prescriptions} prescriptions, ${clinical.drafts} consultation drafts, and ${documents} documents; removed ${cleanedDocuments} verified legacy document files.\n`);
   } finally {
     await lock.query("SELECT pg_advisory_unlock($1::bigint)", [schemaAndMedicalDataLockId]);
     lock.release();

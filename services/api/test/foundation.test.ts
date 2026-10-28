@@ -53,6 +53,9 @@ describe("validated environment", () => {
     expect(parseEnvironment({ API_PORT: "99999", DATABASE_URL: "postgresql://healthcare:test@localhost:5432/test" }).success).toBe(false);
     expect(parseEnvironment({ DATABASE_URL: "not-a-url" }).success).toBe(false);
     expect(parseEnvironment({ DATABASE_URL: "postgresql://healthcare:test@localhost:5432/test", DOCTOR_RECOMMENDATIONS_ENABLED: "yes" }).success).toBe(false);
+    expect(parseEnvironment({ DATABASE_URL: "postgresql://healthcare:test@localhost:5432/test", FACEBOOK_APP_ID: "synthetic-id" }).success).toBe(false);
+    expect(parseEnvironment({ DATABASE_URL: "postgresql://healthcare:test@localhost:5432/test", FACEBOOK_APP_SECRET: "synthetic-secret" }).success).toBe(false);
+    expect(parseEnvironment({ DATABASE_URL: "postgresql://healthcare:test@localhost:5432/test", FACEBOOK_APP_ID: "synthetic-id", FACEBOOK_APP_SECRET: "synthetic-secret" }).success).toBe(true);
   });
 });
 

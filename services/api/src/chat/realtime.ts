@@ -8,10 +8,11 @@ import type { ChatMessage, ChatRepository } from "./types.js";
 
 const sendSchema = z.object({
   conversationId: z.string().uuid(),
+  appointmentId: z.string().uuid().optional(),
   clientMessageId: z.string().uuid(),
   message: z.string().trim().min(1).max(4000)
 }).strict();
-const conversationSchema = z.object({ conversationId: z.string().uuid() }).strict();
+const conversationSchema = z.object({ conversationId: z.string().uuid(), appointmentId: z.string().uuid().optional() }).strict();
 type Ack = (response: { success: true; data: unknown } | { success: false; error: { code: string; message: string } }) => void;
 
 function sessionToken(cookieHeader: string | undefined, cookieName: string): string | undefined {
@@ -60,10 +61,10 @@ export class ChatRealtime {
           const parsed = conversationSchema.safeParse(input);
           if (!parsed.success) throw new ApiRequestError(400, "VALIDATION_ERROR", "Conversation request is invalid.");
           const user = socketUser(socket)!;
-          if (!await repository.authorizeConversation(user, parsed.data.conversationId)) {
+          if (!await repository.authorizeConversation(user, parsed.data.conversationId, parsed.data.appointmentId)) {
             throw new ApiRequestError(404, "CONVERSATION_NOT_FOUND", "Conversation was not found.");
           }
-          await repository.auditAccess(user, parsed.data.conversationId, "subscribe", socket.id);
+          await repository.auditAccess(user, parsed.data.conversationId, "subscribe", socket.id, parsed.data.appointmentId);
           await socket.join(`conversation:${parsed.data.conversationId}`);
           acknowledge?.({ success: true, data: { joined: true } });
         } catch (error) { ackError(acknowledge, error); }
@@ -78,7 +79,8 @@ export class ChatRealtime {
           const result = await repository.sendMessage(user, {
             conversationId: parsed.data.conversationId,
             clientMessageId: parsed.data.clientMessageId,
-            body: parsed.data.message
+            body: parsed.data.message,
+            appointmentId: parsed.data.appointmentId
           }, socket.id);
           io.to(`conversation:${parsed.data.conversationId}`).emit("message:new", result.message);
           acknowledge?.({ success: true, data: result });
@@ -90,7 +92,7 @@ export class ChatRealtime {
           const parsed = conversationSchema.safeParse(input);
           if (!parsed.success) throw new ApiRequestError(400, "VALIDATION_ERROR", "Conversation request is invalid.");
           const user = socketUser(socket)!;
-          const lastReadSequence = await repository.markRead(user, parsed.data.conversationId, socket.id);
+          const lastReadSequence = await repository.markRead(user, parsed.data.conversationId, socket.id, parsed.data.appointmentId);
           io.to(`conversation:${parsed.data.conversationId}`).emit("conversation:read", {
             conversationId: parsed.data.conversationId,
             userId: user.id,

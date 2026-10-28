@@ -13,7 +13,9 @@ const profileSchema = z.object({
   specialization: z.string().trim().min(2).max(100),
   qualification: z.string().trim().max(160).optional().nullable().transform((value) => value || null),
   experienceYears: z.number().int().min(0).max(60).optional().nullable().transform((value) => value ?? null),
-  bio: z.string().trim().max(1200).optional().nullable().transform((value) => value || null)
+  bio: z.string().trim().max(1200).optional().nullable().transform((value) => value || null),
+  licenseNumber: z.string().trim().min(3).max(512).optional().nullable().transform((value) => value || null),
+  licenseJurisdiction: z.string().trim().min(2).max(120).optional().nullable().transform((value) => value || null)
 }).strict();
 
 const availabilitySchema = z.object({
@@ -27,6 +29,7 @@ const availabilitySchema = z.object({
 
 const directoryQuery = z.object({ specialization: z.string().trim().min(2).max(100).optional() }).strict();
 const approvalSchema = z.object({ status: z.enum(["approved", "rejected", "suspended"]) }).strict();
+const licenseReviewSchema = z.object({ status: z.enum(["verified", "rejected"]), note: z.string().trim().min(5).max(500) }).strict();
 
 function currentUser(response: Parameters<import("express").RequestHandler>[1]): PublicUser {
   const user = response.locals.user as PublicUser | undefined;
@@ -89,6 +92,17 @@ export function createDoctorRouter(authRepository: AuthRepository, doctorReposit
       const { id } = response.locals.validated.params as { id: string };
       const { status } = response.locals.validated.body as { status: DoctorApprovalStatus };
       const profile = await service.setApprovalStatus(id, status, currentUser(response).id, response.locals.requestId);
+      response.json({ success: true, data: { profile }, meta: { requestId: response.locals.requestId } });
+    } catch (error) { next(error); }
+  });
+
+  router.patch("/:id/license-review", requireAuthenticated(authRepository, cookieName), requireRoles("Admin"), validateRequest({ params: z.object({ id: z.string().uuid() }), body: licenseReviewSchema }), async (_request, response, next) => {
+    try {
+      const { id } = response.locals.validated.params as { id: string };
+      const { status, note } = response.locals.validated.body as z.infer<typeof licenseReviewSchema>;
+      if (!doctorRepository.reviewLicense) throw new ApiRequestError(503, "LICENSE_REVIEW_UNAVAILABLE", "License review is unavailable.");
+      const profile = await doctorRepository.reviewLicense(id, status, note, currentUser(response).id, response.locals.requestId);
+      if (!profile) throw new ApiRequestError(404, "DOCTOR_NOT_FOUND", "Doctor profile was not found.");
       response.json({ success: true, data: { profile }, meta: { requestId: response.locals.requestId } });
     } catch (error) { next(error); }
   });

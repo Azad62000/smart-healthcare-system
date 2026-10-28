@@ -68,22 +68,22 @@ Loss of a referenced medical-data key makes the corresponding encrypted content 
 
 ## 5. Migration and encryption deployment order
 
-Migration 016 is additive for the expected schema: it adjusts the message-body constraint and adds format/version metadata with legacy defaults. It does not encrypt existing records. The new API requires these columns for encrypted writes. The migration runner commits each migration and its checksum ledger row in one transaction and uses a PostgreSQL advisory lock; failures roll back the current migration while earlier committed versions remain recorded.
+Migration 016 adds message/document encryption metadata and adjusts the message-body constraint. Migration 022 adds version markers for consultation records, prescriptions, and consultation-note drafts; migration 023 checks encrypted payload shape. These migrations do not encrypt existing content. The new API requires these columns for encrypted writes. The migration runner commits each migration and its checksum ledger row in one transaction and uses a PostgreSQL advisory lock; failures roll back the current migration while earlier committed versions remain recorded.
 
 Before 016, the runner requires non-null `care_messages.body` text, non-null `appointment_documents.storage_key` UUID and `media_type` text, and the expected `care_messages_body_check` constraint for 1–4,000 characters. It rejects pre-existing encryption columns or the replacement constraint without a ledger entry. These targeted preflight checks are not a full schema compatibility comparison.
 
 Use a coordinated cutover, not a rolling deployment:
 
 1. Complete the reviewed schema and restore checks above. Ensure every API instance has the same medical-data keyring and its protected recovery copy is available.
-2. Stop all API writers. Apply the reviewed migration through the exact target, for example:
+2. Stop all API writers. Apply the reviewed migration through the exact target (currently 023), for example:
 
    ```sh
-   npm run db:migrate -w @healthcare/api -- --target=016_medical_data_encryption.sql
+   npm run db:migrate -w @healthcare/api -- --target=023_clinical_encryption_shape_checks.sql
    ```
 
-   This applies any earlier pending migrations before 016. Inspect the output and ledger. Do not run this command against a pre-ledger populated database until its reviewed baseline is recorded.
+   This applies any earlier pending migrations before 023. Inspect the output and ledger. Do not run this command against a pre-ledger populated database until its reviewed baseline is recorded.
 3. Start only the encryption-capable API release. Confirm every old plaintext-only instance is stopped and removed from traffic before accepting writes. New message/document writes are encrypted immediately; an old binary cannot read those encrypted writes.
-4. Run the conversion report-only command and review its counts. Document counts are metadata counts, not proof of file existence or integrity. The `--rotate` report authenticates encrypted document files it reads, but key-ID counts alone do not verify message ciphertext integrity.
+4. Run the conversion report-only command and review its counts for messages, clinical records, prescriptions, consultation-note drafts, and documents. Document counts are metadata counts, not proof of file existence or integrity. The `--rotate` report authenticates encrypted document files it reads, but key-ID counts alone do not verify ciphertext integrity for database payloads.
 5. A real conversion is a separate approved operation. It requires a verified restorable database/file backup, the required acknowledgements, a maintenance window, and an explicit change approval. This task does not authorize or run that operation.
 6. After any approved conversion, verify message and document reads, authorization failures, document integrity, restart behavior, conversion counts, and key IDs with synthetic accounts before resuming normal traffic.
 
@@ -92,6 +92,7 @@ The schema migration is transactional, but there is no automatic down migration.
 ## 6. Interrupted conversion recovery
 
 - **Messages:** Each bounded message batch updates message bodies and version markers in one database transaction. If a batch fails, it rolls back; rerun only after investigating the error and confirming the active/previous keyring remains available.
+- **Clinical records, prescriptions, and consultation drafts:** Each bounded database batch encrypts the sensitive fields into a context-bound authenticated payload and clears the corresponding legacy plaintext columns in the same transaction. A failed batch rolls back; retain the keyring and rerun after investigating.
 - **Documents:** Encrypted bytes are written and authenticated before metadata is switched; the plaintext original is removed only after the encrypted format is recorded. An interruption can leave both files, or leave encrypted metadata with a legacy sibling. Preserve both formats and the backup; do not manually delete files. After checking database/file state and the keyring, the conversion utility can resume and verify encrypted files before cleanup.
 - If integrity, metadata, or file state is unclear, stop writes and restore both database and private storage from the same verified backup point. Never combine a database from one backup time with document files from another.
 - Keep old keys until all converted and rotated content has been verified. Do not claim a conversion or restore succeeded without checking the actual database, files, and authorized read path.

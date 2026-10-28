@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import type { Appointment, AppointmentStatus } from "./types.js";
+import { queueAppointmentNotifications } from "../notifications/events.js";
 
 export type AppointmentType = "in_person" | "video";
 export interface ScheduleInput {
@@ -114,7 +115,7 @@ export class PostgresAdminAppointmentRepository implements AdminAppointmentRepos
       this.db.query<{ id: string; name: string; email: string }>(
         `SELECT d.id,d.given_name || ' ' || d.family_name AS name,u.email
          FROM users u JOIN doctors d ON d.user_id=u.id
-        WHERE u.status='active' AND d.approval_status='approved'
+        WHERE u.status='active' AND d.approval_status='approved' AND (d.is_synthetic=true OR d.license_status='verified')
           AND ($1::boolean OR d.is_synthetic=false) ORDER BY name LIMIT 500`,
         [this.allowSynthetic]
       )
@@ -138,7 +139,7 @@ export class PostgresAdminAppointmentRepository implements AdminAppointmentRepos
            WHERE a.doctor_id=d.id AND a.status IN ('booked','confirmed')
              AND tstzrange(a.starts_at,a.ends_at,'[)') && tstzrange($1::timestamptz,$2::timestamptz,'[)')), '[]'::json) AS conflicts
        FROM doctors d JOIN users u ON u.id=d.user_id
-       WHERE u.role='Doctor' AND u.status='active' AND d.approval_status='approved'
+       WHERE u.role='Doctor' AND u.status='active' AND d.approval_status='approved' AND (d.is_synthetic=true OR d.license_status='verified')
          AND ($8::boolean OR d.is_synthetic=false)
          AND d.consultation_modes @> ARRAY[$3::text]
          AND ($4::text IS NULL OR d.specialization ILIKE '%' || $4 || '%')
@@ -192,7 +193,7 @@ export class PostgresAdminAppointmentRepository implements AdminAppointmentRepos
       );
       const doctor = await client.query<{ id: string; accepting_appointments: boolean; consultation_modes: string[] }>(
         `SELECT d.id,d.accepting_appointments,d.consultation_modes FROM doctors d JOIN users u ON u.id=d.user_id
-         WHERE d.id=$1 AND d.approval_status='approved' AND u.status='active' AND u.role='Doctor'
+         WHERE d.id=$1 AND d.approval_status='approved' AND (d.is_synthetic=true OR d.license_status='verified') AND u.status='active' AND u.role='Doctor'
            AND ($2::boolean OR d.is_synthetic=false) FOR SHARE OF d,u`,
         [input.doctorId, this.allowSynthetic]
       );
@@ -313,16 +314,6 @@ export class PostgresAdminAppointmentRepository implements AdminAppointmentRepos
   }
 
   private async notify(client: PoolClient, appointmentId: string, type: "created" | "cancelled" | "status_changed", detail: string): Promise<void> {
-    const title = type === "created" ? "Appointment scheduled" : type === "cancelled" ? "Appointment cancelled" : "Appointment updated";
-    const message = type === "created" ? "An appointment has been scheduled." : type === "cancelled" ? "An appointment has been cancelled." : "An appointment has been rescheduled.";
-    await client.query(
-      `INSERT INTO notifications(recipient_user_id,event_key,appointment_id,event_type,title,message)
-       SELECT participant.user_id,$2 || ':' || a.id::text || ':' || $5,a.id,$2,$3,$4
-       FROM appointments a
-       CROSS JOIN LATERAL (VALUES(a.patient_id),((SELECT user_id FROM doctors WHERE id=a.doctor_id))) participant(user_id)
-       WHERE a.id=$1 AND participant.user_id IS NOT NULL
-       ON CONFLICT(recipient_user_id,event_key) DO NOTHING`,
-      [appointmentId, type, title, message, detail]
-    );
+    await queueAppointmentNotifications(client, appointmentId, type, detail, true);
   }
 }

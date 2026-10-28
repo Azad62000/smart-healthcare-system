@@ -1,5 +1,6 @@
 import type { Pool } from "pg";
 import type { DocumentStorageFormat } from "./storage.js";
+import { queueEmailToUser } from "../notifications/events.js";
 
 export type DocumentMediaType = "application/pdf" | "image/jpeg" | "image/png";
 export type DocumentAction = "upload" | "list" | "download" | "delete";
@@ -111,6 +112,12 @@ export class PostgresAppointmentDocumentRepository implements AppointmentDocumen
          VALUES($1,$2,$3,'upload',$4)`,
         [rows[0].id, input.appointmentId, input.uploaderUserId, input.requestId]
       );
+      const recipient = await client.query<{ user_id: string }>(
+        `SELECT CASE WHEN $2=a.patient_id THEN d.user_id ELSE a.patient_id END AS user_id
+         FROM appointments a JOIN doctors d ON d.id=a.doctor_id WHERE a.id=$1`,
+        [input.appointmentId, input.uploaderUserId]
+      );
+      if (recipient.rows[0]) await queueEmailToUser(client, recipient.rows[0].user_id, `document_shared:${rows[0].id}`, "document_shared", "A care document was shared with you", "A participant shared a document for your appointment. Sign in to Smart Healthcare to view it securely.");
       await client.query("COMMIT");
       return {
         id: rows[0].id, appointmentId: rows[0].appointment_id, filename: rows[0].filename,

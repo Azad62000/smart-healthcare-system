@@ -18,10 +18,11 @@ export function createNotificationRouter(auth: AuthRepository, repository: Notif
   const service = new NotificationService(repository);
   router.use(requireAuthenticated(auth, cookieName));
   router.use(requireRoles("Patient", "Doctor", "Admin"));
-  router.get("/me", async (_request, response, next) => {
+  router.get("/me", validateRequest({ query: z.object({ limit: z.coerce.number().int().min(1).max(100).default(50), beforeCreatedAt: z.string().datetime().optional(), beforeId: z.string().uuid().optional() }).refine((value) => Boolean(value.beforeCreatedAt) === Boolean(value.beforeId), "Both cursor values are required.") }), async (_request, response, next) => {
     try {
-      const notifications = await service.listMine(actor(response).id);
-      response.json({ success: true, data: { notifications, unreadCount: notifications.filter(({ readAt }) => !readAt).length }, meta: { requestId: response.locals.requestId } });
+      const page = response.locals.validated.query as { limit: number; beforeCreatedAt?: string; beforeId?: string };
+      const result = await service.listMine(actor(response).id, page);
+      response.json({ success: true, data: result, meta: { requestId: response.locals.requestId } });
     } catch (error) { next(error); }
   });
   router.patch("/:id/read", validateRequest({ params: z.object({ id: z.string().uuid() }) }), async (_request, response, next) => {

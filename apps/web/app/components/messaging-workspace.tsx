@@ -39,8 +39,8 @@ export function MessagingWorkspace({ expectedRole }: { expectedRole: "Patient" |
   const dashboardPath = isPatient ? "/patient" : "/doctor";
   const messagesPath = `${dashboardPath}/messages`;
   const links = isPatient
-    ? [{ href: "/patient", label: "Overview" }, { href: "/patient/appointments", label: "Appointments" }, { href: "/patient/messages", label: "Messages" }, { href: "/patient/records", label: "Health records" }, { href: "/patient/prescriptions", label: "Prescriptions" }]
-    : [{ href: "/doctor", label: "Overview" }, { href: "/doctor/messages", label: "Messages" }, { href: "/doctor/prescriptions", label: "Prescriptions" }];
+    ? [{ href: "/patient", label: "Overview" }, { href: "/patient/appointments", label: "Appointments" }, { href: "/patient/records", label: "Health records" }, { href: "/patient/prescriptions", label: "Prescriptions" }]
+    : [{ href: "/doctor", label: "Overview" }, { href: "/doctor/prescriptions", label: "Prescriptions" }];
 
   const [userId, setUserId] = useState("");
   const [conversations, setConversations] = useState<Conversation[]>([]);

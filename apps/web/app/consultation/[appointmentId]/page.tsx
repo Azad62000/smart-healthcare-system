@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { LiveKitRoom, RoomAudioRenderer, StartAudio, VideoConference } from "@livekit/components-react";
 import { useParams } from "next/navigation";
 import { AppointmentDocuments } from "../../components/appointment-documents";
+import { ConsultationChat } from "../../components/consultation-chat";
 
 type Consultation = {
   appointmentId: string;
@@ -13,6 +14,7 @@ type Consultation = {
   endsAt: string;
   appointmentStatus: string;
   status: string;
+  doctorJoinedAt: string | null;
   actualStartedAt: string | null;
   actualEndedAt: string | null;
 };
@@ -82,6 +84,25 @@ export default function ConsultationPage() {
     })();
     return () => { active = false; };
   }, [appointmentId]);
+
+  useEffect(() => {
+    if (role !== "Patient" || !consultation || consultation.doctorJoinedAt || consultation.actualEndedAt) return;
+    let active = true;
+    const timer = window.setInterval(() => {
+      void (async () => {
+        try {
+          const data = await readResponse(await fetch(`${apiUrl}/api/v1/teleconsultations/${appointmentId}`, { credentials: "include" }));
+          const latest = data.consultation as Consultation;
+          if (!active) return;
+          setConsultation(latest);
+          if (latest.doctorJoinedAt) setNotice("Your doctor has joined the video room. You can join now.");
+        } catch {
+          // A brief refresh failure should not interrupt the open consultation page.
+        }
+      })();
+    }, 5000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [appointmentId, role, consultation?.doctorJoinedAt, consultation?.actualEndedAt]);
 
   async function joinConsultation() {
     setBusy(true); setError(""); setNotice("");
@@ -156,10 +177,9 @@ export default function ConsultationPage() {
           <h2>Consultation details</h2>
           <dl className="profile-details"><div><dt>Patient</dt><dd>{consultation.patientDisplayName}</dd></div><div><dt>Doctor</dt><dd>{consultation.doctorDisplayName}</dd></div><div><dt>Scheduled</dt><dd>{new Date(consultation.startsAt).toLocaleString()}</dd></div><div><dt>Status</dt><dd>{consultation.status.replace("_", " ")}</dd></div><div><dt>Started</dt><dd>{consultation.actualStartedAt ? new Date(consultation.actualStartedAt).toLocaleTimeString() : "Not started"}</dd></div></dl>
           <p className="form-help">Audio/video is not recorded. The service stores appointment and connection timing metadata only.</p>
+          {(role === "Doctor" || role === "Patient") && <ConsultationChat appointmentId={appointmentId} />}
           {connected && <button className="secondary-button" type="button" disabled={busy} onClick={() => void endConsultation()}>{busy ? "Ending…" : "End consultation"}</button>}
           {role === "Doctor" && <a href="/doctor/prescriptions">Prescription board</a>}
-          {role === "Doctor" && <a href="/doctor/messages">Message patient</a>}
-          {role === "Patient" && <a href="/patient/messages">Message care team</a>}
           {role === "Patient" && consultation.appointmentStatus === "completed" && <a className="primary-button feedback-followup-link" href="/patient/appointments#history">Rate this consultation</a>}
           {(role === "Doctor" || role === "Patient") && <section className="consultation-notes">
             <h2>{role === "Doctor" ? "Consultation notes" : "Doctor's summary"}</h2>

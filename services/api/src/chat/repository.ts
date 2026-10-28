@@ -3,6 +3,7 @@ import type { Pool, PoolClient } from "pg";
 import type { PublicUser } from "../auth/repository.js";
 import { ApiRequestError } from "../request-error.js";
 import { MedicalDataCrypto, messageAdditionalData } from "../medical-data-crypto.js";
+import { queueEmailToUser } from "../notifications/events.js";
 import type { ChatAccessAction, ChatConversation, ChatMessage, ChatRepository, MessagePage, SendMessageInput } from "./types.js";
 
 interface ConversationRow {
@@ -147,8 +148,8 @@ export class PostgresChatRepository implements ChatRepository {
     );
   }
 
-  async auditAccess(user: PublicUser, conversationId: string, action: "subscribe", requestId: string) {
-    if (!await this.authorizeConversation(user, conversationId)) {
+  async auditAccess(user: PublicUser, conversationId: string, action: "subscribe", requestId: string, appointmentId?: string) {
+    if (!await this.authorizeConversation(user, conversationId, appointmentId)) {
       throw new ApiRequestError(404, "CONVERSATION_NOT_FOUND", "Conversation was not found.");
     }
     await this.audit(this.db, user, conversationId, action, requestId);
@@ -177,7 +178,34 @@ export class PostgresChatRepository implements ChatRepository {
     return rows.map((row) => mapConversation(row, this.crypto));
   }
 
-  private async authorizedConversation(db: Pool | PoolClient, user: PublicUser, conversationId: string, lock = false) {
+  async getAppointmentConversation(user: PublicUser, appointmentId: string, requestId: string): Promise<ChatConversation> {
+    if (user.role !== "Patient" && user.role !== "Doctor") throw new ApiRequestError(403, "FORBIDDEN", "Administrators cannot access patient conversations.");
+    const client = await this.db.connect();
+    try {
+      await client.query("BEGIN");
+      const roleFilter = user.role === "Patient" ? "a.patient_id=$2" : "d.user_id=$2";
+      const { rows } = await client.query<{ patient_id: string; doctor_id: string }>(
+        `SELECT a.patient_id,a.doctor_id FROM appointments a JOIN doctors d ON d.id=a.doctor_id
+         WHERE a.id=$1 AND ${roleFilter} AND a.status IN ('booked','confirmed','completed') FOR SHARE OF a`,
+        [appointmentId, user.id]
+      );
+      const appointment = rows[0];
+      if (!appointment) throw new ApiRequestError(404, "APPOINTMENT_NOT_FOUND", "Appointment was not found.");
+      const conversation = await client.query<{ id: string }>(
+        `INSERT INTO care_conversations(patient_id,doctor_id) VALUES($1,$2)
+         ON CONFLICT(patient_id,doctor_id) DO UPDATE SET updated_at=care_conversations.updated_at RETURNING id`,
+        [appointment.patient_id, appointment.doctor_id]
+      );
+      const conversationId = conversation.rows[0]!.id;
+      await this.audit(client, user, conversationId, "history", requestId);
+      await client.query("COMMIT");
+      const { rows: result } = await this.db.query<ConversationRow>(`${conversationSelect} WHERE c.id=$3`, [user.id, user.role, conversationId]);
+      return mapConversation(result[0]!, this.crypto);
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
+  }
+
+  private async authorizedConversation(db: Pool | PoolClient, user: PublicUser, conversationId: string, lock = false, appointmentId?: string) {
     const roleFilter = user.role === "Patient" ? "c.patient_id=$2" : "d.user_id=$2";
     const { rows } = await db.query<{ id: string }>(
       `SELECT c.id FROM care_conversations c
@@ -186,22 +214,22 @@ export class PostgresChatRepository implements ChatRepository {
          AND EXISTS (
            SELECT 1 FROM appointments a
            WHERE a.patient_id=c.patient_id AND a.doctor_id=c.doctor_id
-             AND a.status IN ('confirmed','completed')
+           AND (a.status IN ('confirmed','completed') OR ($3::uuid IS NOT NULL AND a.id=$3 AND a.status IN ('booked','confirmed')))
            ${lock ? "FOR SHARE" : ""}
          )
        ${lock ? "FOR SHARE OF c" : ""}`,
-      [conversationId, user.id]
+      [conversationId, user.id, appointmentId ?? null]
     );
     return rows[0];
   }
 
-  async authorizeConversation(user: PublicUser, conversationId: string): Promise<boolean> {
+  async authorizeConversation(user: PublicUser, conversationId: string, appointmentId?: string): Promise<boolean> {
     if (user.role !== "Patient" && user.role !== "Doctor") return false;
-    return Boolean(await this.authorizedConversation(this.db, user, conversationId));
+    return Boolean(await this.authorizedConversation(this.db, user, conversationId, false, appointmentId));
   }
 
-  async listMessages(user: PublicUser, conversationId: string, before: number | undefined, limit: number, requestId: string): Promise<MessagePage> {
-    if (!await this.authorizeConversation(user, conversationId)) {
+  async listMessages(user: PublicUser, conversationId: string, before: number | undefined, limit: number, requestId: string, appointmentId?: string): Promise<MessagePage> {
+    if (!await this.authorizeConversation(user, conversationId, appointmentId)) {
       throw new ApiRequestError(404, "CONVERSATION_NOT_FOUND", "Conversation was not found.");
     }
     const { rows } = await this.db.query<MessageRow>(
@@ -234,7 +262,7 @@ export class PostgresChatRepository implements ChatRepository {
     const client = await this.db.connect();
     try {
       await client.query("BEGIN");
-      if (!await this.authorizedConversation(client, user, input.conversationId, true)) {
+      if (!await this.authorizedConversation(client, user, input.conversationId, true, input.appointmentId)) {
         throw new ApiRequestError(404, "CONVERSATION_NOT_FOUND", "Conversation was not found.");
       }
       const messageId = randomUUID();
@@ -278,6 +306,15 @@ export class PostgresChatRepository implements ChatRepository {
         [input.conversationId, user.id, row!.sequence]
       );
       await this.audit(client, user, input.conversationId, "send", requestId);
+      if (!duplicate) {
+        const recipient = await client.query<{ user_id: string }>(
+          `SELECT CASE WHEN c.patient_id=$2 THEN d.user_id ELSE c.patient_id END AS user_id
+           FROM care_conversations c JOIN doctors d ON d.id=c.doctor_id WHERE c.id=$1`,
+          [input.conversationId, user.id]
+        );
+        const hourBucket = new Date().toISOString().slice(0, 13);
+        if (recipient.rows[0]) await queueEmailToUser(client, recipient.rows[0].user_id, `new_message:${input.conversationId}:${hourBucket}`, "new_message", "You have a new care message", "You have a new message in Smart Healthcare. Sign in to view it securely.");
+      }
       await client.query("COMMIT");
       return { message: mapMessage(row!, this.crypto), duplicate };
     } catch (error) {
@@ -288,14 +325,14 @@ export class PostgresChatRepository implements ChatRepository {
     }
   }
 
-  async markRead(user: PublicUser, conversationId: string, requestId: string): Promise<number> {
+  async markRead(user: PublicUser, conversationId: string, requestId: string, appointmentId?: string): Promise<number> {
     if (user.role !== "Patient" && user.role !== "Doctor") {
       throw new ApiRequestError(403, "FORBIDDEN", "Administrators cannot access patient conversations.");
     }
     const client = await this.db.connect();
     try {
       await client.query("BEGIN");
-      if (!await this.authorizedConversation(client, user, conversationId, true)) {
+      if (!await this.authorizedConversation(client, user, conversationId, true, appointmentId)) {
         throw new ApiRequestError(404, "CONVERSATION_NOT_FOUND", "Conversation was not found.");
       }
       const { rows } = await client.query<{ last_read_sequence: string }>(

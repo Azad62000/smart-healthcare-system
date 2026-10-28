@@ -112,6 +112,8 @@ button:disabled { cursor: not-allowed; }
 .card-icon { width: 2.5rem; height: 2.5rem; display: grid; place-items: center; color: #16877d; background: #e8f6f3; border-radius: .8rem; font-size: 1.4rem; }
 .profile-form { display: grid; gap: 1rem; }
 .profile-form label { display: grid; gap: .4rem; color: #415961; font-size: .86rem; font-weight: 600; }
+.profile-form .checkbox-label { display: flex; align-items: flex-start; gap: .6rem; font-weight: 500; line-height: 1.5; }
+.profile-form .checkbox-label input { width: 1rem; min-height: 1rem; margin-top: .15rem; flex: 0 0 auto; accent-color: #14796f; }
 .profile-form input { width: 100%; min-height: 2.75rem; padding: .65rem .75rem; border: 1px solid #ccd9dd; border-radius: .55rem; background: white; color: #18313b; }
 .profile-form input:focus, .profile-form textarea:focus, .booking-form select:focus { border-color: #087d72; }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: .85rem; }
@@ -426,14 +428,26 @@ main:not(.welcome-page) { max-width: 80rem; }
 .mfa-recovery-codes li { padding: .5rem; border-radius: .4rem; background: #f0f5f4; text-align: center; }
 .oauth-options { display: grid; gap: .6rem; margin: 1rem 0; }
 .oauth-options a { justify-content: center; text-decoration: none; }
+.oauth-google-button { display: inline-flex; align-items: center; gap: .65rem; }
+.oauth-google-icon { display: block; width: 1.2rem; height: 1.2rem; flex: 0 0 auto; }
+.oauth-facebook-button { display: inline-flex; align-items: center; gap: .65rem; }
+.oauth-facebook-icon { display: block; width: 1.2rem; height: 1.2rem; flex: 0 0 auto; }
 .auth-success { margin: 0; color: #17624f; font-size: .85rem; }
-.consultation-shell { display: grid; grid-template-columns: minmax(0, 1fr) minmax(18rem, .35fr); gap: 1rem; align-items: start; }
-.consultation-video { min-height: 32rem; overflow: hidden; border-radius: .65rem; background: #10252d; }
+.consultation-shell { display: grid; width: 100%; min-width: 0; grid-template-columns: minmax(0, 1.8fr) minmax(18rem, min(24rem, 36%)); gap: 1rem; align-items: start; box-sizing: border-box; }
+.consultation-shell > *, .consultation-side-panel, .consultation-chat { min-width: 0; max-width: 100%; box-sizing: border-box; }
+.consultation-video { width: 100%; min-width: 0; min-height: 32rem; overflow: hidden; border-radius: .65rem; background: #10252d; }
 .consultation-video > .lk-room-container { min-height: 32rem; }
 .consultation-waiting { display: grid; min-height: 32rem; align-content: center; justify-items: center; gap: 1rem; padding: 2rem; color: white; text-align: center; }
 .consultation-waiting p { max-width: 36rem; }
 .consultation-side-panel { display: grid; gap: 1rem; padding: 1rem; }
 .consultation-side-panel h2 { margin: 0; }
+.consultation-chat { display: grid; min-height: 20rem; max-height: 32rem; grid-template-rows: auto minmax(8rem, 1fr) auto; gap: .7rem; border: 1px solid #dfe8e8; border-radius: .7rem; padding: .85rem; }
+.consultation-chat > header { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.consultation-chat > header p { margin: .25rem 0 0; color: #63737a; font-size: .8rem; }
+.consultation-chat-history { display: flex; min-height: 8rem; flex-direction: column; gap: .55rem; overflow-y: auto; padding: .5rem .1rem; }
+.consultation-chat-history .message-bubble { max-width: 94%; padding: .6rem .7rem; }
+.consultation-chat-composer { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: .5rem; border-top: 1px solid #dfe8e8; padding-top: .65rem; }
+.consultation-chat-composer textarea { width: 100%; min-width: 0; resize: vertical; }
 .consultation-notes { display: grid; gap: .75rem; border-top: 1px solid #dfe8e8; padding-top: 1rem; }
 .consultation-notes textarea { min-height: 5rem; }
 .messaging-layout { display: grid; grid-template-columns: minmax(15rem, .36fr) minmax(0, 1fr); gap: 1rem; min-height: 36rem; }
@@ -461,7 +475,8 @@ main:not(.welcome-page) { max-width: 80rem; }
 .message-composer small { color: #63737a; }
 .older-messages { align-self: flex-start; margin-top: .7rem; }
 @media (max-width: 760px) { .messaging-layout { grid-template-columns: 1fr; } .conversation-sidebar { border-right: 0; border-bottom: 1px solid #dfe8e8; padding: 0 0 1rem; } .conversation-sidebar ul { display: flex; overflow-x: auto; } .conversation-sidebar li { min-width: 13rem; } }
-@media (max-width: 800px) { .consultation-shell { grid-template-columns: 1fr; } .consultation-video, .consultation-video > .lk-room-container { min-height: 24rem; } }
+@media (max-width: 1400px) { .consultation-shell { grid-template-columns: minmax(0, 1fr); } .consultation-video, .consultation-video > .lk-room-container { min-height: clamp(18rem, 58vw, 30rem); } .consultation-waiting { min-height: clamp(18rem, 58vw, 30rem); padding: 1.25rem; } .consultation-side-panel { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; } .consultation-chat { grid-row: span 2; } }
+@media (max-width: 620px) { .consultation-side-panel { grid-template-columns: minmax(0, 1fr); padding: .25rem; } .consultation-chat { grid-row: auto; min-height: 22rem; } .consultation-shell { padding: 1rem; } }
 @media (max-width: 760px) { .appointments-layout { grid-template-columns: 1fr; } .doctor-appointments { grid-column: auto; } }
 @media (max-width: 760px) { .auth-page { grid-template-columns: 1fr; gap: 2rem; min-height: auto; } }
 @media (max-width: 900px) { .directory-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

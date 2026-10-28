@@ -102,7 +102,7 @@ export default function PatientDashboard() {
   }
 
   return <main className="patient-dashboard">
-    <DashboardNav currentPath="/patient" links={[{ href: "/patient", label: "Overview" }, { href: "/doctors", label: "Find a doctor" }, { href: "/patient/appointments", label: "Appointments" }, { href: "/patient/messages", label: "Messages" }, { href: "/patient/records", label: "Health records" }, { href: "/patient/prescriptions", label: "Prescriptions" }, { href: "/patient/reports", label: "Reports" }, { href: "/ai", label: "AI services" }, { href: "/chat", label: "Health chat" }]} />
+    <DashboardNav currentPath="/patient" links={[{ href: "/patient", label: "Overview" }, { href: "/doctors", label: "Find a doctor" }, { href: "/patient/appointments", label: "Appointments" }, { href: "/patient/records", label: "Health records" }, { href: "/patient/prescriptions", label: "Prescriptions" }, { href: "/patient/reports", label: "Reports" }, { href: "/ai", label: "AI services" }, { href: "/chat", label: "Health chat" }]} />
     <header className="dashboard-heading"><div><p className="eyebrow">PATIENT WORKSPACE</p><h1>Welcome{profile ? `, ${profile.givenName}` : ""}</h1><p>Manage your profile and find your care information.</p></div></header>
     {error && <div className="notice notice-error" role="alert"><span>{error}</span><button type="button" className="text-button" onClick={() => void loadProfile()}>Retry</button></div>}
     {notice && <p className="notice notice-success" role="status">{notice}</p>}

@@ -1,5 +1,5 @@
-import { MessagingWorkspace } from "../../components/messaging-workspace";
+import { redirect } from "next/navigation";
 
-export default function DoctorMessagesPage() {
-  return <MessagingWorkspace expectedRole="Doctor" />;
+export default function DoctorMessagesRedirect() {
+  redirect("/doctor");
 }

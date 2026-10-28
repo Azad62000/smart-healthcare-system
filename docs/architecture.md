@@ -12,12 +12,12 @@ Statuses below describe repository implementation, not production readiness. Pro
 
 | Area | Status | Repository evidence / boundary |
 | --- | --- | --- |
-| Auth | Implemented; integrations configuration-dependent | Password/session routes, Patient email-code workflows, Admin TOTP MFA, OAuth routes, and PostgreSQL login throttling exist. SMTP and Google/Apple provider setup are required for their flows. Phone OTP and self-service Admin MFA recovery are not implemented. |
+| Auth | Implemented; integrations configuration-dependent | Password/session routes, Patient email-code workflows, Admin TOTP MFA, verified-email Admin recovery, OAuth routes, and PostgreSQL login throttling exist. SMTP and Google/Facebook provider setup are required for their flows. Phone OTP is not included. |
 | Patient | Implemented | Patient profile, appointments, records, prescriptions, reports, notifications, documents, and messaging are present in the web app/API. Pagination is not consistent across all Patient collections. |
-| Doctor | Implemented; credential verification partial | Profile, Admin approval, availability, appointment queue/status, care records, prescriptions, messaging, and consultation workflows exist. Professional license verification is outside current functionality. |
+| Doctor | Implemented; license review is manual | Profiles include encrypted license submissions; Admins record the official registry reference when reviewing. There is no automatic registry integration. |
 | Appointment | Implemented | Patient booking, Doctor appointment lifecycle, and Admin scheduling/list/reschedule/cancel routes exist. Availability is rechecked and database exclusion constraints protect active appointment overlaps. Availability/recommendation results do not reserve slots. |
-| Health records | Implemented; encryption coverage partial | Patient/Doctor relationship-scoped record operations and access audits exist. Application-level encryption covers new messages and private document files, not every clinical record or prescription field. |
-| Notifications | Partial | Durable in-app appointment notifications are recipient-scoped and markable as read. Listing is capped at 100 and unread count is calculated from that page; high unread volumes can be undercounted. Email/SMS delivery is future work. |
+| Health records | Implemented; local legacy conversion completed | Patient/Doctor relationship-scoped records and access audits exist. New messages, documents, clinical records, prescriptions, and consultation-note drafts are application-encrypted; readers retain compatibility for older rows. |
+| Notifications | Implemented; SMTP-dependent | Appointment events create in-app alerts and email outbox entries. Background delivery covers lifecycle events, reminders, video room/doctor join, messages/documents/records/prescriptions, and Admin security events. Phone OTP and SMS notifications are not included. |
 | Admin | Implemented | Analytics, doctor review, account-status controls, MFA, paginated account/appointment record views, and manual scheduling exist. Complete Admin browser workflow verification remains unrecorded. |
 | Messaging | Implemented | Patient–Doctor REST/Socket.IO messaging persists messages, enforces care-relationship authorization, supports cursor pagination/read cursors/idempotency, and audits access metadata. The separate general `/chat` AI placeholder is unavailable. |
 | Video | Configuration-dependent | Appointment-linked LiveKit token and consultation lifecycle code/UI exist; calls require LiveKit settings. Join timestamps are client-reported, not provider-verified. |
@@ -144,6 +144,8 @@ REST endpoints:
 Socket.IO authenticates the same session cookie. `conversation:join`, `message:send`, and `conversation:read` each independently verify current authorization. Persisted messages are broadcast only after storage; send acknowledgments include the persisted message. Reconnecting clients rejoin authorized conversations and fetch missed history over REST. HTTP send remains available while Socket.IO is offline. The single-process API applies a 30-message-per-user-per-minute in-memory limit; this is not a distributed rate limiter.
 
 New message bodies are encrypted with AES-256-GCM before PostgreSQL persistence. The versioned envelope stores a key ID, random 12-byte nonce, authentication tag, and ciphertext; additional authenticated data binds the content to its conversation, message, and sender IDs. Authorized API code decrypts only after participant authorization, preserving the existing response contract and idempotency behavior. Existing rows marked `encryption_version=0` remain legacy plaintext until the explicit conversion tool is run; new rows are marked version 1. This is application-level encryption, not E2EE.
+
+Consultation records, prescriptions, and consultation-note drafts use the same authenticated envelope format. Migration 022 adds version markers and bounded envelope constraints; migration 023 ensures the unused legacy columns are cleared for encrypted payloads. Associated data binds each payload to its resource and patient/doctor identities. New writes encrypt these values, while authorized reads support legacy version 0 during the controlled conversion window. The conversion utility reports and converts these tables in bounded transactions alongside messages and documents.
 
 ```mermaid
 sequenceDiagram
@@ -277,7 +279,7 @@ PostgreSQL is the relational database. The table below summarizes current servic
 
 Use UUID identifiers unless an implementation-specific reason favors another opaque key. Apply foreign keys, `NOT NULL`, uniqueness, checks, and indexes for lookup and scheduling invariants. Define deletion, correction, retention, encryption-at-rest, backup, and audit retention policies before production data. Do not store secrets in source control or migrations.
 
-### In-app appointment notification flow
+### Appointment notification flow
 
 ```mermaid
 sequenceDiagram
@@ -291,8 +293,8 @@ sequenceDiagram
   Actor->>API: Book, cancel, or change appointment status
   API->>Appt: Validate identity, ownership, and transition
   Appt->>DB: Update appointment and append status history
-  Appt->>DB: Insert participant notifications with unique event keys
-  Note over DB: Appointment change and notifications commit or roll back together
+  Appt->>DB: Insert participant notifications
+  Note over DB: Appointment change and in-app alerts commit or roll back together
   DB-->>Appt: Commit
   Appt-->>API: Appointment result
   Web->>Notify: GET /api/v1/notifications/me
@@ -303,7 +305,7 @@ sequenceDiagram
   Notify->>DB: Update only when recipient_user_id matches session user
 ```
 
-The `notifications` table uses a unique `(recipient_user_id, event_key)` constraint. Event keys use appointment ID, event type, and (for status updates) the transition; inserts use `ON CONFLICT DO NOTHING`, so retrying an event cannot create duplicate recipient notifications, while distinct status changes remain visible. Appointment event notifications are inserted in the same transaction as the appointment change. Email is optional future work; paid SMS, Kafka, RabbitMQ, and cloud services are out of scope.
+The `notifications` table uses a unique `(recipient_user_id, event_key)` constraint. Event keys use appointment ID, event type, and (for status updates) the transition; inserts use `ON CONFLICT DO NOTHING`, so retrying an event cannot create duplicate recipient notifications, while distinct status changes remain visible. Appointment event notifications are inserted in the same transaction as the appointment change. All appointment and video-call alerts remain in-app; SMTP is reserved for account verification and password recovery.
 
 ### Notification API
 
@@ -393,16 +395,18 @@ The Patient Service owns the `patients` profile row linked one-to-one to `users.
 
 ## Known implementation gaps
 
-- OAuth uses the short-lived browser-bound state cookie in addition to state, nonce, and PKCE; the flow cookie is cleared before the one-time server flow is consumed. No separate database migration is required.
+- Google OAuth uses state, nonce, PKCE, and the short-lived browser-bound state cookie. Facebook OAuth uses a server-side authorization-code exchange and the same browser-bound state protection; Graph profile lookup requests the `email` permission and uses an app-secret proof. The one-time flow is consumed only after the callback cookie matches. Migration 018 expands provider constraints while retaining historical Apple identity values; Apple sign-in is no longer an active route.
 - Password login is throttled to 10 attempts per account/source-address pair per 15 minutes using PostgreSQL. HMAC bucket keys contain no raw account/IP values; successful credentials clear that pair's bucket. API replicas must share `AUTH_OTP_PEPPER`. Configure only trusted ingress addresses with `TRUSTED_PROXY_ADDRESSES`; an ingress-level limit is still recommended against distributed credential stuffing.
 - Guarded PostgreSQL messaging tests verify persistence, participant authorization, deduplication, pagination, read cursors, and metadata-only audits. They do not replace a signed-in Patient/Doctor browser exchange.
 - The mocked browser suite covers dashboard and selected appointment/consultation UI paths. Separate live browser checks with existing synthetic Patient/Doctor fixtures verified role-scoped reads, recommendations, booking/cancellation, messaging, documents, and logout. The opt-in self-registration scenario still returns `503` because SMTP is not configured, so new-account verification and a second newly registered Patient remain unverified. Admin workflow stops at MFA enrollment; no Admin security state was changed.
 - Message rate limiting is in-memory and per API process. It is not a distributed limiter; multi-process deployments need a shared rate-limit store.
-- Notification reads return at most 100 recent rows and the current unread count is calculated from those rows, so it can undercount a larger unread backlog. Email/SMS appointment delivery is not implemented. Pagination is also not implemented consistently across every Patient/Doctor collection; high-volume collections should be paginated before larger deployments.
-- Doctor profile approval is an administrative workflow, not professional-license verification. A production onboarding process still needs an appropriate identity and credential verification policy.
-- New message writes and private document uploads are AES-256-GCM encrypted at the application layer; legacy plaintext remains readable until the explicit conversion utility runs. This is not E2EE, and a server holding configured keys can decrypt the content. Protect keys separately from database/file backups, test key recovery, and plan a forward-compatible rollback before encrypted writes are deployed.
-- Migration 016 only changes schema metadata and message envelope capacity; it does not convert existing content. The conversion/rotation utility is report-only by default and requires a verified backup acknowledgement to apply. PostgreSQL/disk/backup encryption-at-rest, retention automation, and deployment-specific private storage controls remain separate operational responsibilities. Prescription drafting/finalization remains outside this implementation. Optional AI/chatbot integrations remain unconfigured.
+- Notification reads use cursor pagination and calculate unread totals independently of the current page. Email delivery uses a transactional outbox with idempotency keys and retries; message and clinical-resource emails contain generic text only. Pagination is not implemented consistently across every Patient/Doctor collection; high-volume collections should be paginated before larger deployments.
+- Doctor license review is manual. Admins should verify against the relevant official licensing authority and record its URL/reference before approving a real doctor. License status gates directory visibility and appointment selection.
+- Admin MFA recovery uses an OTP sent to the Admin's verified email, then disables the old authenticator and requires new enrollment. This requires configured SMTP.
+- Automated emails require active, email-verified recipients and configured SMTP. The outbox retries failed delivery up to five times. Sender defaults are set through `SMTP_FROM_NAME` and `SMTP_FROM`; the SMTP account must authorize the requested sender address.
+- New message, document, clinical-record, prescription, and consultation-note writes are AES-256-GCM encrypted at the application layer; readers retain legacy compatibility. The current local conversion completed, and converted database payloads were authenticated. This is not E2EE, and a server holding configured keys can decrypt the content. Protect keys separately from database/file backups and plan a forward-compatible rollback before encrypted writes are deployed.
+- Migrations 016 and 022–023 change schema metadata and envelope constraints; they do not convert existing content. The conversion/rotation utility is report-only by default and requires a verified backup acknowledgement to apply. PostgreSQL/disk/backup encryption-at-rest, retention automation, and deployment-specific private storage controls remain separate operational responsibilities. Optional AI/chatbot integrations remain unconfigured.
 - Doctor recommendations remain disabled by default. Their stateless implementation queries availability for approved profiles individually (up to 100 directory entries); a larger directory may warrant a batched availability query. A suggested slot can be booked by another patient before selection; transactional booking validation remains authoritative.
 - Set `NEXT_PUBLIC_API_URL` in the web build environment to the public HTTPS API origin before production builds. Production web builds reject a missing or non-HTTPS API URL; local development continues to default to localhost. Configured production LiveKit endpoints must use WSS.
-- SMTP, Google/Apple OAuth, and LiveKit are unconfigured in the verified local environment. Account registration/email verification and provider sign-in therefore need those services/credentials; LiveKit video is unavailable without all provider settings.
+- SMTP is configured and its connection/authentication was verified locally without sending an email. Google OAuth is configured and its authorization-start redirect was verified; full sign-in was not browser-verified. Facebook OAuth is implemented but not configured; Meta App ID/Secret and valid redirect settings are still required. LiveKit remains configuration-dependent.
 - `/health` is a liveness check, not a database-readiness check. Use an external readiness check for PostgreSQL before routing production traffic. Configure and test database backups and restores; protect the MFA encryption key because loss prevents recovery of encrypted TOTP seeds.

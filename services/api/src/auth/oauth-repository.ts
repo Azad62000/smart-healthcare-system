@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import type { Pool } from "pg";
 import type { UserRecord } from "./repository.js";
 
-export type OAuthProvider = "google" | "apple";
+export type OAuthProvider = "google" | "facebook";
 export interface OAuthFlow {
   provider: OAuthProvider;
   nonce: string;

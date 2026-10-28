@@ -32,7 +32,17 @@ const baselineMarkers: Record<string, Array<[string, string]>> = {
   "014_demo_doctors_and_private_documents.sql": [["appointment_documents", "storage_key"], ["doctors", "synthetic_dataset_id"]],
   "015_auth_login_rate_limits.sql": [["auth_login_attempt_limits", "bucket_hash"]],
   "016_medical_data_encryption.sql": [["care_messages", "encryption_version"], ["appointment_documents", "storage_format"]],
-  "017_appointment_feedback.sql": [["appointment_feedback", "rating"], ["appointment_feedback", "comment"]]
+  "017_appointment_feedback.sql": [["appointment_feedback", "rating"], ["appointment_feedback", "comment"]],
+  "018_auth_facebook_provider.sql": [["constraint:auth_identities_provider_check", "facebook"], ["constraint:auth_oauth_flows_provider_check", "facebook"]],
+  "019_doctor_join_notifications.sql": [["constraint:notifications_event_type_check", "doctor_joined"]],
+  "020_notification_delivery_outbox.sql": [["notification_deliveries", "channel"], ["notification_deliveries", "notification_id"]],
+  "021_email_only_notifications.sql": [["notification_deliveries", "channel"], ["notification_deliveries", "notification_id"]],
+  "022_clinical_data_encryption.sql": [["consultation_records", "encryption_version"], ["prescriptions", "encryption_version"], ["consultation_note_drafts", "encryption_version"]],
+  "023_clinical_encryption_shape_checks.sql": [["constraint:prescriptions_encrypted_payload_shape_check", "encrypted"], ["constraint:consultation_note_drafts_encrypted_payload_shape_check", "encrypted"]],
+  "024_identity_verification_and_mfa_recovery.sql": [["doctors", "license_status"], ["auth_email_codes", "purpose"]],
+  "025_remove_phone_otp.sql": [["patients", "phone"]],
+  "026_email_notifications.sql": [["email_outbox", "event_key"], ["email_outbox", "status"]],
+  "027_backfill_video_consultations.sql": [["teleconsultations", "room_name"]]
 };
 
 export function createMigration(filename: string, sql: string): Migration {
@@ -157,17 +167,29 @@ async function verifyBaselineSchema(client: PoolClient, migrations: Migration[],
      WHERE table_schema='public'`
   );
   const columns = new Set(rows.map((row) => `${row.table_name}.${row.column_name}`));
-  const missing = migrations.slice(0, throughIndex + 1).flatMap((migration) =>
-    (baselineMarkers[migration.filename] ?? []).filter(([table, column]) => !columns.has(`${table}.${column}`))
-      .map(([table, column]) => `${table}.${column}`)
-  );
-  if (missing.length) {
-    throw new Error(`Baseline schema checks failed; missing expected columns: ${missing.join(", ")}.`);
+  const markerExists = async (table: string, marker: string) => {
+    if (!table.startsWith("constraint:")) return columns.has(`${table}.${marker}`);
+    const { rows: constraints } = await client.query<{ definition: string }>(
+      "SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conname=$1",
+      [table.slice("constraint:".length)]
+    );
+    return constraints.some((constraint) => constraint.definition.includes(`'${marker}'`));
+  };
+  const missing: string[] = [];
+  for (const migration of migrations.slice(0, throughIndex + 1)) {
+    for (const [table, marker] of baselineMarkers[migration.filename] ?? []) {
+      if (!await markerExists(table, marker)) missing.push(`${table}.${marker}`);
+    }
   }
-  const laterMarkers = migrations.slice(throughIndex + 1).flatMap((migration) =>
-    (baselineMarkers[migration.filename] ?? []).filter(([table, column]) => columns.has(`${table}.${column}`))
-      .map(([table, column]) => `${table}.${column}`)
-  );
+  if (missing.length) {
+    throw new Error(`Baseline schema checks failed; missing expected schema markers: ${missing.join(", ")}.`);
+  }
+  const laterMarkers: string[] = [];
+  for (const migration of migrations.slice(throughIndex + 1)) {
+    for (const [table, marker] of baselineMarkers[migration.filename] ?? []) {
+      if (await markerExists(table, marker)) laterMarkers.push(`${table}.${marker}`);
+    }
+  }
   if (laterMarkers.length) {
     throw new Error(`Baseline target is older than the detected schema markers: ${laterMarkers.join(", ")}.`);
   }

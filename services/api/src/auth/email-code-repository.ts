@@ -2,7 +2,7 @@ import { createHmac, randomInt, timingSafeEqual } from "node:crypto";
 import type { Pool } from "pg";
 import { config } from "../config.js";
 
-export type EmailCodePurpose = "verify_email" | "password_reset";
+export type EmailCodePurpose = "verify_email" | "password_reset" | "admin_mfa_recovery";
 
 export interface EmailCodeRepository {
   issue(userId: string, purpose: EmailCodePurpose): Promise<string | undefined>;
@@ -83,7 +83,7 @@ export class PostgresEmailCodeRepository implements EmailCodeRepository {
       }
       if (purpose === "verify_email") {
         await client.query("UPDATE users SET email_verified=true,updated_at=now() WHERE id=$1", [userId]);
-      } else {
+      } else if (purpose === "password_reset") {
         if (!passwordHash) { await client.query("ROLLBACK"); return false; }
         await client.query("UPDATE users SET password_hash=$2,updated_at=now() WHERE id=$1", [userId, passwordHash]);
         await client.query("DELETE FROM auth_sessions WHERE user_id=$1", [userId]);

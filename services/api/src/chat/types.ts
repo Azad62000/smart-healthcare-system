@@ -33,15 +33,17 @@ export interface SendMessageInput {
   conversationId: string;
   clientMessageId: string;
   body: string;
+  appointmentId?: string;
 }
 
 export type ChatAccessAction = "list" | "history" | "send" | "read" | "subscribe";
 
 export interface ChatRepository {
   listConversations(user: PublicUser, requestId: string): Promise<ChatConversation[]>;
-  authorizeConversation(user: PublicUser, conversationId: string): Promise<boolean>;
-  listMessages(user: PublicUser, conversationId: string, before: number | undefined, limit: number, requestId: string): Promise<MessagePage>;
+  getAppointmentConversation(user: PublicUser, appointmentId: string, requestId: string): Promise<ChatConversation>;
+  authorizeConversation(user: PublicUser, conversationId: string, appointmentId?: string): Promise<boolean>;
+  listMessages(user: PublicUser, conversationId: string, before: number | undefined, limit: number, requestId: string, appointmentId?: string): Promise<MessagePage>;
   sendMessage(user: PublicUser, input: SendMessageInput, requestId: string): Promise<{ message: ChatMessage; duplicate: boolean }>;
-  markRead(user: PublicUser, conversationId: string, requestId: string): Promise<number>;
-  auditAccess(user: PublicUser, conversationId: string, action: "subscribe", requestId: string): Promise<void>;
+  markRead(user: PublicUser, conversationId: string, requestId: string, appointmentId?: string): Promise<number>;
+  auditAccess(user: PublicUser, conversationId: string, action: "subscribe", requestId: string, appointmentId?: string): Promise<void>;
 }

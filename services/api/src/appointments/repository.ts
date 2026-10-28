@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import type { Appointment, AppointmentRepository, AppointmentStatus, AvailableSlot } from "./types.js";
+import { queueAppointmentNotifications } from "../notifications/events.js";
 
 interface AppointmentRow { id: string; patient_id: string; doctor_id: string; starts_at: Date; ends_at: Date; status: AppointmentStatus; patient_display_name: string; doctor_display_name: string; specialization: string; appointment_type: "in_person" | "video"; scheduling_note: string | null; doctor_is_synthetic: boolean; }
 function mapAppointment(row: AppointmentRow): Appointment { return { id: row.id, patientId: row.patient_id, doctorId: row.doctor_id, startsAt: row.starts_at.toISOString(), endsAt: row.ends_at.toISOString(), status: row.status, patientDisplayName: row.patient_display_name, doctorDisplayName: row.doctor_display_name, specialization: row.specialization, type: row.appointment_type, schedulingNote: row.scheduling_note, doctorIsSynthetic: row.doctor_is_synthetic }; }
@@ -15,7 +17,7 @@ export class PostgresAppointmentRepository implements AppointmentRepository {
   async listAvailableSlots(doctorId: string, from: string, to: string, type?: "in_person" | "video"): Promise<AvailableSlot[]> {
     const { rows } = await this.db.query<{ starts_at: Date; ends_at: Date }>(
       `SELECT av.starts_at, av.ends_at FROM doctor_availability av
-       JOIN doctors d ON d.id=av.doctor_id AND d.approval_status='approved' AND d.accepting_appointments=true
+       JOIN doctors d ON d.id=av.doctor_id AND d.approval_status='approved' AND d.accepting_appointments=true AND (d.is_synthetic=true OR d.license_status='verified')
        WHERE av.doctor_id=$1 AND av.starts_at >= $2 AND av.ends_at <= $3
          AND ($4::text IS NULL OR d.consultation_modes @> ARRAY[$4]::text[])
          AND ($5::boolean OR d.is_synthetic=false)
@@ -34,7 +36,7 @@ export class PostgresAppointmentRepository implements AppointmentRepository {
       if (!patientProfile[0]) throw Object.assign(new Error("patient profile required"), { code: "PATIENT_PROFILE_REQUIRED" });
       const { rows: available } = await client.query(
         `SELECT av.id FROM doctor_availability av JOIN doctors d ON d.id=av.doctor_id
-         WHERE av.doctor_id=$1 AND d.approval_status='approved' AND d.accepting_appointments=true
+         WHERE av.doctor_id=$1 AND d.approval_status='approved' AND d.accepting_appointments=true AND (d.is_synthetic=true OR d.license_status='verified')
            AND d.consultation_modes @> ARRAY[$4]::text[]
            AND ($5::boolean OR d.is_synthetic=false)
            AND av.starts_at <= $2 AND av.ends_at >= $3 FOR UPDATE OF av, d`,
@@ -54,6 +56,12 @@ export class PostgresAppointmentRepository implements AppointmentRepository {
          VALUES ($1,$2,$3,$4,'booked',$5,$6) RETURNING id`, [patientId, doctorId, startsAt, endsAt, actorId, type]
       );
       await client.query("INSERT INTO appointment_status_history (appointment_id,actor_user_id,from_status,to_status) VALUES ($1,$2,NULL,'booked')", [insert.rows[0]!.id, actorId]);
+      if (type === "video") {
+        await client.query(
+          "INSERT INTO teleconsultations(appointment_id,room_name) VALUES($1,$2)",
+          [insert.rows[0]!.id, `consult-${randomUUID().replaceAll("-", "")}`]
+        );
+      }
       await this.writeNotifications(client, insert.rows[0]!.id, "created");
       await client.query("COMMIT");
       return this.getById(this.db, insert.rows[0]!.id);
@@ -135,16 +143,6 @@ export class PostgresAppointmentRepository implements AppointmentRepository {
   }
 
   private async writeNotifications(client: PoolClient, appointmentId: string, eventType: "created" | "cancelled" | "status_changed", eventDetail?: string) {
-    const title = eventType === "created" ? "Appointment booked" : eventType === "cancelled" ? "Appointment cancelled" : "Appointment status updated";
-    const message = eventType === "created" ? "An appointment has been booked." : eventType === "cancelled" ? "An appointment has been cancelled." : "An appointment status has changed.";
-    await client.query(
-      `INSERT INTO notifications (recipient_user_id, event_key, appointment_id, event_type, title, message)
-       SELECT participant.user_id, $2 || ':' || ($1::uuid)::text || ':' || COALESCE($5, ''), a.id, $2, $3, $4
-       FROM appointments a
-       CROSS JOIN LATERAL (VALUES (a.patient_id), ((SELECT user_id FROM doctors WHERE id=a.doctor_id))) participant(user_id)
-       WHERE a.id=$1 AND participant.user_id IS NOT NULL
-       ON CONFLICT (recipient_user_id, event_key) DO NOTHING`,
-      [appointmentId, eventType, title, message, eventDetail ?? null]
-    );
+    await queueAppointmentNotifications(client, appointmentId, eventType, eventDetail);
   }
 }

@@ -7,6 +7,9 @@ import { requireAuthenticated } from "../auth/authorization.js";
 import { config } from "../config.js";
 import { ApiRequestError } from "../request-error.js";
 import { validateRequest } from "../middleware/validate-request.js";
+import { queueDoctorJoinedNotification, queueEmailToUser } from "../notifications/events.js";
+import { randomUUID } from "node:crypto";
+import { clinicalDataAdditionalData, MedicalDataCrypto } from "../medical-data-crypto.js";
 
 interface ConsultationRow {
   appointment_id: string;
@@ -46,6 +49,7 @@ async function findConsultation(db: Pool, appointmentId: string): Promise<Consul
      FROM appointments a
      JOIN teleconsultations tc ON tc.appointment_id=a.id
      JOIN patients p ON p.user_id=a.patient_id
+     JOIN users u ON u.id=a.patient_id
      JOIN doctors d ON d.id=a.doctor_id
      WHERE a.id=$1`,
     [appointmentId]
@@ -79,6 +83,7 @@ function publicConsultation(row: ConsultationRow) {
 
 export function createTeleconsultationRouter(auth: AuthRepository, db: Pool, cookieName: string): Router {
   const router = Router();
+  const medicalCrypto = MedicalDataCrypto.fromConfiguration(config.MEDICAL_DATA_ENCRYPTION_KEYS);
   const appointmentParams = validateRequest({ params: z.object({ appointmentId: z.string().uuid() }) });
     const noteRequest = validateRequest({
       params: z.object({ appointmentId: z.string().uuid() }),
@@ -158,16 +163,27 @@ export function createTeleconsultationRouter(auth: AuthRepository, db: Pool, coo
       const client = await db.connect();
       try {
         await client.query("BEGIN");
+        const joined = await client.query<{ doctor_joined_at: Date | null; patient_joined_at: Date | null }>(
+          "SELECT doctor_joined_at,patient_joined_at FROM teleconsultations WHERE appointment_id=$1 FOR UPDATE",
+          [appointmentId]
+        );
+        if (!joined.rows[0]) throw new ApiRequestError(404, "CONSULTATION_NOT_FOUND", "Video consultation was not found.");
+        const firstJoin = role === "Doctor" ? !joined.rows[0].doctor_joined_at : !joined.rows[0].patient_joined_at;
         await client.query(
           `UPDATE teleconsultations SET ${column}=COALESCE(${column},now()),
            actual_started_at=COALESCE(actual_started_at,now()),status='in_progress',updated_at=now()
            WHERE appointment_id=$1`,
           [appointmentId]
         );
-        await client.query(
-          "INSERT INTO teleconsultation_events(appointment_id,actor_user_id,event_type) VALUES($1,$2,$3)",
-          [appointmentId, user.id, event]
-        );
+        if (firstJoin) {
+          await client.query(
+            "INSERT INTO teleconsultation_events(appointment_id,actor_user_id,event_type) VALUES($1,$2,$3)",
+            [appointmentId, user.id, event]
+          );
+        }
+        if (role === "Doctor" && firstJoin) {
+          await queueDoctorJoinedNotification(client, row.patient_id, appointmentId);
+        }
         await client.query("COMMIT");
       } catch (error) {
         await client.query("ROLLBACK");
@@ -229,16 +245,24 @@ export function createTeleconsultationRouter(auth: AuthRepository, db: Pool, coo
       if (!row) throw new ApiRequestError(404, "CONSULTATION_NOT_FOUND", "Video consultation was not found.");
       const role = participant(row, user);
       if (!role) throw new ApiRequestError(403, "FORBIDDEN", "You are not assigned to this consultation.");
-      const { rows } = await db.query(
-        `SELECT summary,symptoms,observations,assessment,follow_up,
+      const { rows } = await db.query<{
+        appointment_id: string; patient_id: string; doctor_id: string; summary: string; symptoms: string | null;
+        observations: string | null; assessment: string | null; follow_up: string | null; internal_notes: string | null;
+        encryption_version: number; finalized_at: Date | null;
+      }>(
+        `SELECT appointment_id,patient_id,doctor_id,summary,symptoms,observations,assessment,follow_up,
                 ${role === "Doctor" ? "internal_notes" : "NULL::text AS internal_notes"},
-                finalized_at
+                encryption_version,finalized_at
          FROM consultation_note_drafts WHERE appointment_id=$1
          ${role === "Patient" ? "AND finalized_at IS NOT NULL" : ""}`,
         [appointmentId]
       );
       if (!rows[0]) throw new ApiRequestError(404, "NOTES_NOT_FOUND", "No consultation summary is available.");
-      response.json({ success: true, data: { notes: rows[0] }, meta: { requestId: response.locals.requestId } });
+      const draft = rows[0]!;
+      const notes = draft.encryption_version === 1
+        ? JSON.parse(medicalCrypto.decryptText(draft.summary, clinicalDataAdditionalData("consultation-draft", draft.appointment_id, draft.patient_id, draft.doctor_id), true)) as Record<string, unknown>
+        : { summary: draft.summary, symptoms: draft.symptoms, observations: draft.observations, assessment: draft.assessment, followUp: draft.follow_up, internalNotes: draft.internal_notes };
+      response.json({ success: true, data: { notes: { ...notes, finalizedAt: draft.finalized_at } }, meta: { requestId: response.locals.requestId } });
     } catch (error) { next(error); }
   });
 
@@ -255,21 +279,21 @@ export function createTeleconsultationRouter(auth: AuthRepository, db: Pool, coo
       if (!row) throw new ApiRequestError(404, "CONSULTATION_NOT_FOUND", "Video consultation was not found.");
       if (!participant(row, user)) throw new ApiRequestError(403, "FORBIDDEN", "You are not assigned to this consultation.");
       if (row.actual_ended_at) throw new ApiRequestError(409, "CONSULTATION_ENDED", "Consultation notes can no longer be edited.");
+      const encryptedDraft = medicalCrypto.encryptText(JSON.stringify({ summary: input.summary, symptoms: input.symptoms ?? null, observations: input.observations ?? null, assessment: input.assessment ?? null, followUp: input.followUp ?? null, internalNotes: input.internalNotes ?? null }), clinicalDataAdditionalData("consultation-draft", appointmentId, row.patient_id, row.doctor_id));
       const { rows } = await db.query(
         `INSERT INTO consultation_note_drafts
-           (appointment_id,patient_id,doctor_id,summary,symptoms,observations,assessment,follow_up,internal_notes)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+           (appointment_id,patient_id,doctor_id,summary,symptoms,observations,assessment,follow_up,internal_notes,encryption_version)
+         VALUES($1,$2,$3,$4,NULL,NULL,NULL,NULL,NULL,1)
          ON CONFLICT (appointment_id) DO UPDATE SET
-           summary=EXCLUDED.summary,symptoms=EXCLUDED.symptoms,observations=EXCLUDED.observations,
-           assessment=EXCLUDED.assessment,follow_up=EXCLUDED.follow_up,internal_notes=EXCLUDED.internal_notes,
+           summary=EXCLUDED.summary,symptoms=NULL,observations=NULL,
+           assessment=NULL,follow_up=NULL,internal_notes=NULL,encryption_version=1,
            updated_at=now()
          WHERE consultation_note_drafts.finalized_at IS NULL
-         RETURNING summary,symptoms,observations,assessment,follow_up,internal_notes,finalized_at`,
-        [appointmentId, row.patient_id, row.doctor_id, input.summary, input.symptoms ?? null,
-          input.observations ?? null, input.assessment ?? null, input.followUp ?? null, input.internalNotes ?? null]
+         RETURNING finalized_at`,
+        [appointmentId, row.patient_id, row.doctor_id, encryptedDraft]
       );
       if (!rows[0]) throw new ApiRequestError(409, "NOTES_FINALIZED", "Finalized consultation notes cannot be changed.");
-      response.json({ success: true, data: { notes: rows[0] }, meta: { requestId: response.locals.requestId } });
+      response.json({ success: true, data: { notes: { summary: input.summary, symptoms: input.symptoms ?? null, observations: input.observations ?? null, assessment: input.assessment ?? null, followUp: input.followUp ?? null, internalNotes: input.internalNotes ?? null, finalizedAt: rows[0].finalized_at } }, meta: { requestId: response.locals.requestId } });
     } catch (error) { next(error); }
   });
 
@@ -285,9 +309,9 @@ export function createTeleconsultationRouter(auth: AuthRepository, db: Pool, coo
       if (!row.actual_ended_at) throw new ApiRequestError(409, "CONSULTATION_ACTIVE", "End the consultation before finalizing its summary.");
       await client.query("BEGIN");
       const draft = await client.query<{
-        summary: string; assessment: string | null; record_id: string | null;
+        summary: string; assessment: string | null; encryption_version: number; record_id: string | null;
       }>(
-        "SELECT summary,assessment,record_id FROM consultation_note_drafts WHERE appointment_id=$1 FOR UPDATE",
+        "SELECT summary,assessment,encryption_version,record_id FROM consultation_note_drafts WHERE appointment_id=$1 FOR UPDATE",
         [appointmentId]
       );
       if (!draft.rows[0]) throw new ApiRequestError(404, "NOTES_NOT_FOUND", "Save consultation notes before finalizing them.");
@@ -296,16 +320,21 @@ export function createTeleconsultationRouter(auth: AuthRepository, db: Pool, coo
         response.json({ success: true, data: { recordId: draft.rows[0].record_id }, meta: { requestId: response.locals.requestId } });
         return;
       }
-      const record = await client.query<{ id: string }>(
-        `INSERT INTO consultation_records(patient_id,doctor_id,appointment_id,consultation_at,note,diagnosis)
-         VALUES($1,$2,$3,COALESCE($4::timestamptz,now()),$5,$6) RETURNING id`,
-        [row.patient_id, row.doctor_id, appointmentId, row.actual_started_at, draft.rows[0].summary, draft.rows[0].assessment]
+      const draftValues = draft.rows[0]!.encryption_version === 1
+        ? JSON.parse(medicalCrypto.decryptText(draft.rows[0]!.summary, clinicalDataAdditionalData("consultation-draft", appointmentId, row.patient_id, row.doctor_id), true)) as { summary: string; assessment: string | null }
+        : { summary: draft.rows[0]!.summary, assessment: draft.rows[0]!.assessment };
+      const recordId = randomUUID();
+      const encryptedRecord = medicalCrypto.encryptText(JSON.stringify({ note: draftValues.summary, diagnosis: draftValues.assessment }), clinicalDataAdditionalData("record", recordId, row.patient_id, row.doctor_id));
+      await client.query(
+        `INSERT INTO consultation_records(id,patient_id,doctor_id,appointment_id,consultation_at,note,diagnosis,encryption_version)
+         VALUES($1,$2,$3,$4,COALESCE($5::timestamptz,now()),$6,NULL,1)`,
+        [recordId, row.patient_id, row.doctor_id, appointmentId, row.actual_started_at, encryptedRecord]
       );
-      const recordId = record.rows[0]!.id;
       await client.query(
         "UPDATE consultation_note_drafts SET record_id=$2,finalized_at=now(),finalized_by=$3,updated_at=now() WHERE appointment_id=$1",
         [appointmentId, recordId, user.id]
       );
+      await queueEmailToUser(client, row.patient_id, `health_record:${recordId}`, "health_record_created", "A new health record is available", "A new health record is available in Smart Healthcare. Sign in to review it securely.");
       await client.query("COMMIT");
       response.status(201).json({ success: true, data: { recordId }, meta: { requestId: response.locals.requestId } });
     } catch (error) {

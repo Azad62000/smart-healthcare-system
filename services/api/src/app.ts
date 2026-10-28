@@ -74,7 +74,7 @@ app.use("/api/v1/patients", createPatientRouter(
   sessionCookieName
 ));
 const allowSyntheticDoctors = config.NODE_ENV !== "production";
-const doctorRepository = new PostgresDoctorRepository(pool, allowSyntheticDoctors);
+const doctorRepository = new PostgresDoctorRepository(pool, allowSyntheticDoctors, medicalDataCrypto);
 const appointmentRepository = new PostgresAppointmentRepository(pool, allowSyntheticDoctors);
 app.use("/api/v1/doctors", createDoctorRouter(
   new PostgresAuthRepository(pool),
@@ -117,14 +117,14 @@ app.use("/api/v1/admin/appointments", createAdminAppointmentRouter(
 ));
 app.use("/api/v1/records", createRecordRouter(
   new PostgresAuthRepository(pool),
-  new PostgresRecordRepository(pool),
+  new PostgresRecordRepository(pool, medicalDataCrypto),
   appointmentRepository,
   doctorRepository,
   sessionCookieName
 ));
 app.use("/api/v1/prescriptions", createPrescriptionRouter(
   new PostgresAuthRepository(pool),
-  new PostgresPrescriptionRepository(pool),
+  new PostgresPrescriptionRepository(pool, medicalDataCrypto),
   appointmentRepository,
   doctorRepository,
   sessionCookieName

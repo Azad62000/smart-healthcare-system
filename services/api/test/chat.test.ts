@@ -50,6 +50,12 @@ class MemoryChatRepository implements ChatRepository {
     return this.relationship && id === conversationId && (user.id === patient.id || user.id === doctor.id);
   }
 
+  async getAppointmentConversation(user: PublicUser, _appointmentId: string, requestId: string): Promise<ChatConversation> {
+    if (!await this.authorizeConversation(user, conversationId)) throw new ApiRequestError(404, "APPOINTMENT_NOT_FOUND", "Appointment was not found.");
+    this.accessEvents.push({ actorId: user.id, conversationId, action: "history", requestId });
+    return (await this.listConversations(user, requestId))[0]!;
+  }
+
   async listMessages(user: PublicUser, id: string, before: number | undefined, limit: number, requestId: string): Promise<MessagePage> {
     if (!await this.authorizeConversation(user, id)) throw new ApiRequestError(404, "CONVERSATION_NOT_FOUND", "Conversation was not found.");
     this.accessEvents.push({ actorId: user.id, conversationId: id, action: "history", requestId });

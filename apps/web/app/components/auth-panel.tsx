@@ -23,6 +23,7 @@ export function AuthPanel({ mode }: { mode: AuthMode }) {
   const [emailFlowMessage, setEmailFlowMessage] = useState("");
   const [emailCode, setEmailCode] = useState("");
   const [oauthNotice, setOauthNotice] = useState("");
+  const [mfaRecoveryRequested, setMfaRecoveryRequested] = useState(false);
 
   useEffect(() => {
     const query = new URLSearchParams(window.location.search);
@@ -32,7 +33,7 @@ export function AuthPanel({ mode }: { mode: AuthMode }) {
     }
     if (query.get("oauth") === "failed") setOauthNotice("Provider sign-in could not be completed. Try again or use email and password.");
     if (query.get("oauth") === "unavailable") {
-      const provider = query.get("provider") === "apple" ? "Apple" : "Google";
+      const provider = query.get("provider") === "facebook" ? "Facebook" : "Google";
       setOauthNotice(`${provider} sign-in is not configured yet. Use email and password for now.`);
     }
   }, []);
@@ -173,6 +174,28 @@ export function AuthPanel({ mode }: { mode: AuthMode }) {
     finally { setBusy(false); }
   }
 
+  async function requestMfaRecovery() {
+    setBusy(true); setError("");
+    try {
+      const response = await fetch(`${apiUrl}/api/v1/auth/mfa/recovery/request`, { method: "POST", credentials: "include" });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error?.message ?? "Could not request recovery code.");
+      setMfaRecoveryRequested(true);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not request recovery code."); }
+    finally { setBusy(false); }
+  }
+
+  async function confirmMfaRecovery(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setBusy(true); setError("");
+    try {
+      const response = await fetch(`${apiUrl}/api/v1/auth/mfa/recovery/confirm`, { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: emailCode }) });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error?.message ?? "Could not verify recovery code.");
+      setEnrollmentRequired(true); setMfaSetup(null); setVerificationCode(""); setMfaRecoveryRequested(false); setEmailCode("");
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not verify recovery code."); }
+    finally { setBusy(false); }
+  }
+
   function cancelMfa() {
     setMfaRequired(false); setEnrollmentRequired(false); setMfaSetup(null); setVerificationCode(""); setRecoveryCodes(null); setError("");
   }
@@ -207,6 +230,8 @@ export function AuthPanel({ mode }: { mode: AuthMode }) {
               <button className="primary-button auth-submit" disabled={busy} type="submit">{busy ? "Verifying…" : "Verify and continue"}</button>
             </form>
           </>}
+          {!enrollmentRequired && !mfaRecoveryRequested && <p className="auth-switch"><button type="button" disabled={busy} onClick={() => void requestMfaRecovery()}>Lost access to your authenticator?</button></p>}
+          {!enrollmentRequired && mfaRecoveryRequested && <form onSubmit={confirmMfaRecovery}><p className="auth-intro">Enter the six-digit code sent to your verified Admin email. You’ll need to enroll a new authenticator immediately.</p><label>Email recovery code<input value={emailCode} onChange={(event) => setEmailCode(event.target.value)} inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} required /></label>{error && <p className="auth-error" role="alert">{error}</p>}<button className="primary-button auth-submit" disabled={busy} type="submit">{busy ? "Checking…" : "Recover Admin access"}</button></form>}
           {error && enrollmentRequired && !mfaSetup && <p className="auth-error" role="alert">{error}</p>}
           <p className="auth-switch"><button type="button" onClick={cancelMfa}>Cancel and return to sign in</button></p>
         </> : emailFlow === "verification" ? <>
@@ -244,8 +269,21 @@ export function AuthPanel({ mode }: { mode: AuthMode }) {
           {oauthNotice && <p className="auth-error" role="alert">{oauthNotice}</p>}
           {emailFlowMessage && <p className="auth-success" role="status">{emailFlowMessage}</p>}
           {mode === "signin" && <div className="oauth-options" aria-label="Other sign-in options">
-            <a className="secondary-button auth-submit" href={`${apiUrl}/api/v1/auth/oauth/google/start`}>Continue with Google</a>
-            <a className="secondary-button auth-submit" href={`${apiUrl}/api/v1/auth/oauth/apple/start`}>Continue with Apple</a>
+            <a className="secondary-button auth-submit oauth-google-button" href={`${apiUrl}/api/v1/auth/oauth/google/start`}>
+              <svg className="oauth-google-icon" aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.1 5.1 0 0 1-2.2 3.34v2.77h3.57c2.08-1.92 3.27-4.74 3.27-8.12Z" />
+                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.63l-3.57-2.77c-.99.66-2.25 1.06-3.71 1.06-2.85 0-5.27-1.92-6.13-4.5H2.18v2.84A11 11 0 0 0 12 23Z" />
+                <path fill="#FBBC05" d="M5.87 14.16a6.6 6.6 0 0 1 0-4.32V7H2.18a11 11 0 0 0 0 10Z" />
+                <path fill="#EA4335" d="M12 4.36c1.62 0 3.06.56 4.2 1.64l3.14-3.14A10.5 10.5 0 0 0 12 1a11 11 0 0 0-9.82 6l3.69 2.84c.86-2.58 3.28-4.5 6.13-4.5Z" />
+              </svg>
+              <span>Continue with Google</span>
+            </a>
+            <a className="secondary-button auth-submit oauth-facebook-button" href={`${apiUrl}/api/v1/auth/oauth/facebook/start`}>
+              <svg className="oauth-facebook-icon" aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+                <path fill="#1877F2" d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073c0 6.019 4.388 11.026 10.125 11.89v-8.402H7.078v-3.488h3.047V9.414c0-3.007 1.778-4.669 4.533-4.669 1.312 0 2.686.236 2.686.236v2.96h-1.513c-1.491 0-1.956.932-1.956 1.888v2.267h3.328l-.532 3.488h-2.796v8.402C19.612 23.1 24 18.092 24 12.073Z" />
+              </svg>
+              <span>Continue with Facebook</span>
+            </a>
           </div>}
           <form onSubmit={authenticate}>
             <label>Email address<input name="email" type="email" autoComplete="username" placeholder="you@example.com" required /></label>

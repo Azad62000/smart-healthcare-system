@@ -33,12 +33,12 @@ const environmentSchema = z.object({
   SMTP_USER: optionalString,
   SMTP_PASSWORD: optionalString,
   SMTP_FROM: z.preprocess((value) => value === "" ? undefined : value, z.string().email().optional()),
+  SMTP_FROM_NAME: z.preprocess((value) => value === "" ? undefined : value, z.string().trim().min(1).max(80).optional()),
   GOOGLE_CLIENT_ID: optionalString,
   GOOGLE_CLIENT_SECRET: optionalString,
-  APPLE_CLIENT_ID: optionalString,
-  APPLE_TEAM_ID: optionalString,
-  APPLE_KEY_ID: optionalString,
-  APPLE_PRIVATE_KEY: optionalString,
+  FACEBOOK_APP_ID: optionalString,
+  FACEBOOK_APP_SECRET: optionalString,
+  FACEBOOK_GRAPH_API_VERSION: z.string().regex(/^v\d+\.0$/).default("v26.0"),
   LIVEKIT_URL: z.preprocess((value) => value === "" ? undefined : value, z.string().url().optional()),
   LIVEKIT_API_KEY: optionalString,
   LIVEKIT_API_SECRET: optionalString,
@@ -62,9 +62,12 @@ const environmentSchema = z.object({
     if (!value.WEB_ORIGIN.startsWith("https://")) context.addIssue({ code: "custom", path: ["WEB_ORIGIN"], message: "The web origin must use HTTPS in production." });
     if (value.LIVEKIT_URL && !value.LIVEKIT_URL.startsWith("wss://")) context.addIssue({ code: "custom", path: ["LIVEKIT_URL"], message: "LiveKit must use WSS in production." });
   }
+  if (Boolean(value.FACEBOOK_APP_ID) !== Boolean(value.FACEBOOK_APP_SECRET)) {
+    context.addIssue({ code: "custom", path: ["FACEBOOK_APP_ID"], message: "FACEBOOK_APP_ID and FACEBOOK_APP_SECRET must be configured together." });
+  }
 });
 
-const environmentKeys = ["NODE_ENV", "API_HOST", "API_PORT", "WEB_ORIGIN", "LOG_LEVEL", "DATABASE_URL", "SESSION_COOKIE_SECURE", "SESSION_TTL_HOURS", "MEDICAL_DATA_ENCRYPTION_KEYS", "ADMIN_MFA_ENCRYPTION_KEY", "AUTH_OTP_PEPPER", "TRUSTED_PROXY_ADDRESSES", "API_PUBLIC_URL", "SMTP_HOST", "SMTP_PORT", "SMTP_SECURE", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "APPLE_CLIENT_ID", "APPLE_TEAM_ID", "APPLE_KEY_ID", "APPLE_PRIVATE_KEY", "LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "TELECONSULTATION_JOIN_WINDOW_MINUTES", "DOCTOR_RECOMMENDATIONS_ENABLED", "DOCUMENT_STORAGE_DIR", "DOCUMENT_MAX_BYTES"] as const;
+const environmentKeys = ["NODE_ENV", "API_HOST", "API_PORT", "WEB_ORIGIN", "LOG_LEVEL", "DATABASE_URL", "SESSION_COOKIE_SECURE", "SESSION_TTL_HOURS", "MEDICAL_DATA_ENCRYPTION_KEYS", "ADMIN_MFA_ENCRYPTION_KEY", "AUTH_OTP_PEPPER", "TRUSTED_PROXY_ADDRESSES", "API_PUBLIC_URL", "SMTP_HOST", "SMTP_PORT", "SMTP_SECURE", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM", "SMTP_FROM_NAME", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "FACEBOOK_APP_ID", "FACEBOOK_APP_SECRET", "FACEBOOK_GRAPH_API_VERSION", "LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "TELECONSULTATION_JOIN_WINDOW_MINUTES", "DOCTOR_RECOMMENDATIONS_ENABLED", "DOCUMENT_STORAGE_DIR", "DOCUMENT_MAX_BYTES"] as const;
 
 function applicationEnvironment(environment: NodeJS.ProcessEnv) {
   return Object.fromEntries(environmentKeys.flatMap((key) => environment[key] === undefined ? [] : [[key, environment[key]]]));
@@ -92,11 +95,7 @@ if (Boolean(parsed.data.SMTP_USER) !== Boolean(parsed.data.SMTP_PASSWORD)) {
 if (Boolean(parsed.data.GOOGLE_CLIENT_ID) !== Boolean(parsed.data.GOOGLE_CLIENT_SECRET)) {
   throw new Error("Invalid environment configuration: GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be configured together.");
 }
-const appleConfig = [parsed.data.APPLE_CLIENT_ID, parsed.data.APPLE_TEAM_ID, parsed.data.APPLE_KEY_ID, parsed.data.APPLE_PRIVATE_KEY];
-if (appleConfig.some(Boolean) && !appleConfig.every(Boolean)) {
-  throw new Error("Invalid environment configuration: all Apple OAuth settings must be configured together.");
-}
-if (parsed.data.NODE_ENV === "production" && (appleConfig.some(Boolean) || parsed.data.GOOGLE_CLIENT_ID)) {
+if (parsed.data.NODE_ENV === "production" && (parsed.data.FACEBOOK_APP_ID || parsed.data.GOOGLE_CLIENT_ID)) {
   if (!parsed.data.API_PUBLIC_URL || !parsed.data.API_PUBLIC_URL.startsWith("https://")) {
     throw new Error("Invalid environment configuration: API_PUBLIC_URL must use HTTPS when OAuth is enabled in production.");
   }

@@ -10,6 +10,14 @@ export function documentAdditionalData(storageKey: string, mediaType: string): s
   return `smart-healthcare|document|v1|${storageKey}|${mediaType}`;
 }
 
+export function clinicalDataAdditionalData(entity: "record" | "prescription" | "consultation-draft", id: string, patientId: string, doctorId: string): string {
+  return `smart-healthcare|${entity}|v1|${id}|${patientId}|${doctorId}`;
+}
+
+export function licenseAdditionalData(doctorUserId: string): string {
+  return `smart-healthcare|doctor-license|v1|${doctorUserId}`;
+}
+
 export interface MedicalDataKey {
   id: string;
   key: Buffer;

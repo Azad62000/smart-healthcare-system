@@ -227,6 +227,44 @@ export function createAuthRouter(repository: AuthRepository, options: AuthRouteO
     } catch (error) { next(error); }
   });
 
+  router.post("/mfa/recovery/request", async (request, response, next) => {
+    try {
+      const mfa = options.mfaRepository;
+      const challengeToken = request.cookies?.[adminMfaCookieName];
+      if (!mfa || typeof challengeToken !== "string") throw invalidMfaChallenge();
+      const challenge = await mfa.findChallenge(challengeToken);
+      if (!challenge || challenge.purpose !== "login") throw invalidMfaChallenge();
+      const user = await repository.findById(challenge.userId);
+      if (!user || user.role !== "Admin" || user.status !== "active" || !user.email_verified) throw invalidMfaChallenge();
+      if (!emailCodes || !emailIsConfigured) throw new ApiRequestError(503, "EMAIL_DELIVERY_NOT_CONFIGURED", "Security recovery email is not configured.");
+      const code = await emailCodes.issue(user.id, "admin_mfa_recovery");
+      if (code) await deliverEmailCode(user.email, code, "admin_mfa_recovery");
+      response.json({ success: true, data: { accepted: true }, meta: { requestId: response.locals.requestId } });
+    } catch (error) { next(error); }
+  });
+
+  router.post("/mfa/recovery/confirm", validateRequest({ body: z.object({ code: z.string().regex(/^\d{6}$/) }).strict() }), async (request, response, next) => {
+    try {
+      const mfa = options.mfaRepository;
+      const challengeToken = request.cookies?.[adminMfaCookieName];
+      if (!mfa || typeof challengeToken !== "string") throw invalidMfaChallenge();
+      const challenge = await mfa.findChallenge(challengeToken);
+      if (!challenge || challenge.purpose !== "login") throw invalidMfaChallenge();
+      const user = await repository.findById(challenge.userId);
+      const { code } = response.locals.validated.body as { code: string };
+      if (!user || user.role !== "Admin" || user.status !== "active" || !user.email_verified || !emailCodes) {
+        throw new ApiRequestError(400, "MFA_RECOVERY_CODE_INVALID", "The recovery code is invalid or expired.");
+      }
+      const consumed = await emailCodes.consume(user.id, "admin_mfa_recovery", code);
+      if (!consumed) throw new ApiRequestError(400, "MFA_RECOVERY_CODE_INVALID", "The recovery code is invalid or expired.");
+      if (!mfa.completeEmailRecovery) throw adminMfaUnavailable();
+      const nextChallenge = await mfa.completeEmailRecovery(challengeToken, user.id);
+      if (!nextChallenge) throw invalidMfaChallenge();
+      setMfaCookie(response, nextChallenge, options);
+      response.json({ success: true, data: { enrollmentRequired: true }, meta: { requestId: response.locals.requestId } });
+    } catch (error) { next(error); }
+  });
+
   router.post("/mfa/verify", validateRequest({ body: z.object({ code: z.string().trim().min(6).max(32) }).strict() }), async (request, response, next) => {
     try {
       const mfa = options.mfaRepository;

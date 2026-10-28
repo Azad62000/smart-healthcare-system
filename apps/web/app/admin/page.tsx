@@ -21,7 +21,12 @@ type PendingDoctor = {
   qualification: string | null;
   experienceYears: number | null;
   bio: string | null;
-  approvalStatus: "pending";
+  licenseStatus?: "missing" | "pending" | "verified" | "rejected";
+  licenseNumber?: string | null;
+  licenseJurisdiction?: string | null;
+  licenseReviewNote?: string | null;
+  isSynthetic?: boolean;
+  approvalStatus: "pending" | "approved" | "rejected" | "suspended";
 };
 type ManagedUser = { id: string; email: string; role: "Patient" | "Doctor" | "Admin"; status: "active" | "inactive" | "locked"; createdAt: string; patientProfileComplete?: boolean; doctorApprovalStatus?: string | null; specialization?: string | null; qualification?: string | null; experienceYears?: number | null; city?: string | null; consultationFeeInr?: number | null };
 type ServiceHealth = { name: string; status: "healthy" | "unavailable" | "configured" | "not_configured"; checkedAt: string; responseTimeMs: number | null; detail: string };
@@ -266,6 +271,20 @@ export default function AdminDashboard() {
     finally { setDecisionInProgress(""); }
   }
 
+  async function reviewDoctorLicense(doctor: PendingDoctor, status: "verified" | "rejected") {
+    const evidence = window.prompt(status === "verified" ? "Enter the official registry URL or reference used for verification:" : "Enter the source or reason for rejecting this license:");
+    if (!evidence?.trim()) return;
+    setDecisionInProgress(doctor.id); setDecisionError(""); setDecisionNotice("");
+    try {
+      const data = await apiData<{ profile: PendingDoctor }>(`/api/v1/doctors/${doctor.id}/license-review`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ status, note: evidence.trim() }) });
+      setPendingDoctors((current) => status === "verified" && data.profile.approvalStatus === "approved"
+        ? current.filter((entry) => entry.id !== doctor.id)
+        : current.map((entry) => entry.id === doctor.id ? { ...entry, ...data.profile } : entry));
+      setDecisionNotice(`License for Dr. ${doctor.givenName} ${doctor.familyName} marked ${status}.`);
+    } catch (cause) { setDecisionError(cause instanceof Error ? cause.message : "License review could not be saved."); }
+    finally { setDecisionInProgress(""); }
+  }
+
   async function updateUserStatus(user: ManagedUser, status: ManagedUser["status"]) {
     setUserStatusBusy(user.id); setUsersError(""); setUserNotice("");
     try {
@@ -358,9 +377,11 @@ export default function AdminDashboard() {
             : <ul className="doctor-approval-list">{pendingDoctors.map((doctor) => {
               const name = `${doctor.givenName} ${doctor.familyName}`;
               return <li className="doctor-approval-item" key={doctor.id}>
-                <div><h3>Dr. {name}</h3><p>{doctor.specialization}{doctor.qualification ? ` · ${doctor.qualification}` : ""}{doctor.experienceYears !== null ? ` · ${doctor.experienceYears} years’ experience` : ""}</p>{doctor.bio && <p>{doctor.bio}</p>}</div>
+                <div><h3>Dr. {name}</h3><p>{doctor.specialization}{doctor.qualification ? ` · ${doctor.qualification}` : ""}{doctor.experienceYears !== null ? ` · ${doctor.experienceYears} years’ experience` : ""}</p>{doctor.bio && <p>{doctor.bio}</p>}<p><strong>License:</strong> {doctor.licenseNumber || "Not submitted"} · {doctor.licenseJurisdiction || "Jurisdiction missing"} · review {doctor.licenseStatus ?? "pending"}</p>{doctor.licenseReviewNote && <p>Review note: {doctor.licenseReviewNote}</p>}<p className="form-help">Confirm this registration against the issuing authority’s official source before marking verified.</p></div>
                 <div className="doctor-approval-actions" aria-label={`Approval actions for Dr. ${name}`}>
-                  <button className="primary-button" type="button" aria-label={`Approve Dr. ${name}`} disabled={Boolean(decisionInProgress)} onClick={() => void decideDoctor(doctor, "approved")}>{decisionInProgress === doctor.id ? "Saving…" : "Approve"}</button>
+                  <button className="primary-button" type="button" disabled={Boolean(decisionInProgress) || !doctor.licenseNumber || !doctor.licenseJurisdiction} onClick={() => void reviewDoctorLicense(doctor, "verified")}>{decisionInProgress === doctor.id ? "Saving…" : "Mark license verified"}</button>
+                  <button className="secondary-button" type="button" disabled={Boolean(decisionInProgress)} onClick={() => void reviewDoctorLicense(doctor, "rejected")}>Reject license</button>
+                  <button className="primary-button" type="button" aria-label={`Approve Dr. ${name}`} disabled={Boolean(decisionInProgress) || (!doctor.isSynthetic && doctor.licenseStatus !== "verified")} onClick={() => void decideDoctor(doctor, "approved")}>{decisionInProgress === doctor.id ? "Saving…" : "Approve"}</button>
                   <button className="secondary-button" type="button" aria-label={`Reject Dr. ${name}`} disabled={Boolean(decisionInProgress)} onClick={() => void decideDoctor(doctor, "rejected")}>Reject</button>
                   <button className="secondary-button" type="button" aria-label={`Suspend Dr. ${name}`} disabled={Boolean(decisionInProgress)} onClick={() => void decideDoctor(doctor, "suspended")}>Suspend</button>
                 </div>

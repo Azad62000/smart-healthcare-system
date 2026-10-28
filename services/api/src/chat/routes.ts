@@ -9,13 +9,15 @@ import type { ChatRepository } from "./types.js";
 import type { ChatRealtime } from "./realtime.js";
 
 const conversationParams = validateRequest({
-  params: z.object({ conversationId: z.string().uuid() })
+  params: z.object({ conversationId: z.string().uuid() }),
+  query: z.object({ appointmentId: z.string().uuid().optional() })
 });
 const historyQuery = validateRequest({
   params: z.object({ conversationId: z.string().uuid() }),
   query: z.object({
     before: z.coerce.number().int().positive().optional(),
-    limit: z.coerce.number().int().min(1).max(100).default(50)
+    limit: z.coerce.number().int().min(1).max(100).default(50),
+    appointmentId: z.string().uuid().optional()
   })
 });
 const messageBody = z.object({
@@ -24,6 +26,7 @@ const messageBody = z.object({
 }).strict();
 const sendMessageRequest = validateRequest({
   params: z.object({ conversationId: z.string().uuid() }),
+  query: z.object({ appointmentId: z.string().uuid().optional() }),
   body: messageBody
 });
 
@@ -71,13 +74,22 @@ export function createChatRouter(
     } catch (error) { next(error); }
   });
 
+  router.get("/appointments/:appointmentId/conversation", validateRequest({ params: z.object({ appointmentId: z.string().uuid() }) }), async (_request, response, next) => {
+    try {
+      const user = currentUser(response); requireMessagingRole(user);
+      const { appointmentId } = response.locals.validated.params as { appointmentId: string };
+      const conversation = await repository.getAppointmentConversation(user, appointmentId, response.locals.requestId);
+      response.json({ success: true, data: { conversation }, meta: { requestId: response.locals.requestId } });
+    } catch (error) { next(error); }
+  });
+
   router.get("/conversations/:conversationId/messages", historyQuery, async (_request, response, next) => {
     try {
       const user = currentUser(response);
       requireMessagingRole(user);
       const { conversationId } = response.locals.validated.params as { conversationId: string };
-      const { before, limit } = response.locals.validated.query as { before?: number; limit: number };
-      const page = await repository.listMessages(user, conversationId, before, limit, response.locals.requestId);
+      const { before, limit, appointmentId } = response.locals.validated.query as { before?: number; limit: number; appointmentId?: string };
+      const page = await repository.listMessages(user, conversationId, before, limit, response.locals.requestId, appointmentId);
       response.json({ success: true, data: page, meta: { requestId: response.locals.requestId } });
     } catch (error) { next(error); }
   });
@@ -88,11 +100,13 @@ export function createChatRouter(
       requireMessagingRole(user);
       if (!limiter.consume(user.id)) throw new ApiRequestError(429, "MESSAGE_RATE_LIMITED", "You are sending messages too quickly. Please wait and try again.");
       const { conversationId } = response.locals.validated.params as { conversationId: string };
+      const { appointmentId } = response.locals.validated.query as { appointmentId?: string };
       const input = response.locals.validated.body as z.infer<typeof messageBody>;
       const result = await repository.sendMessage(user, {
         conversationId,
         clientMessageId: input.clientMessageId,
-        body: input.message
+        body: input.message,
+        appointmentId
       }, response.locals.requestId);
       realtime.publishMessage(result.message);
       response.status(result.duplicate ? 200 : 201).json({
@@ -108,7 +122,8 @@ export function createChatRouter(
       const user = currentUser(response);
       requireMessagingRole(user);
       const { conversationId } = response.locals.validated.params as { conversationId: string };
-      const lastReadSequence = await repository.markRead(user, conversationId, response.locals.requestId);
+      const { appointmentId } = response.locals.validated.query as { appointmentId?: string };
+      const lastReadSequence = await repository.markRead(user, conversationId, response.locals.requestId, appointmentId);
       realtime.publishRead(conversationId, user.id, lastReadSequence);
       response.json({ success: true, data: { lastReadSequence }, meta: { requestId: response.locals.requestId } });
     } catch (error) { next(error); }

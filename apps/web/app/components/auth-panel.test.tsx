@@ -28,11 +28,16 @@ describe("separate authentication pages", () => {
     await waitFor(() => expect(push).toHaveBeenCalledWith("/patient"));
   });
 
-  it("offers Google and Apple sign-in and an email password-reset flow", async () => {
+  it("offers Google and Facebook sign-in with provider logos and an email password-reset flow", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ data: { accepted: true } }) }));
     render(<AuthPanel mode="signin" />);
-    expect(screen.getByRole("link", { name: "Continue with Google" }).getAttribute("href")).toContain("/oauth/google/start");
-    expect(screen.getByRole("link", { name: "Continue with Apple" }).getAttribute("href")).toContain("/oauth/apple/start");
+    const googleLink = screen.getByRole("link", { name: "Continue with Google" });
+    expect(googleLink.getAttribute("href")).toContain("/oauth/google/start");
+    expect(googleLink.querySelector("svg.oauth-google-icon[aria-hidden='true']")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Continue with Apple" })).toBeNull();
+    const facebookLink = screen.getByRole("link", { name: "Continue with Facebook" });
+    expect(facebookLink.getAttribute("href")).toContain("/oauth/facebook/start");
+    expect(facebookLink.querySelector("svg.oauth-facebook-icon[aria-hidden='true']")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Forgot password?" }));
     fireEvent.change(screen.getByLabelText("Email address"), { target: { value: "patient@example.test" } });
     fireEvent.click(screen.getByRole("button", { name: "Send reset code" }));

@@ -9,6 +9,10 @@ export interface DoctorProfile {
   qualification: string | null;
   experienceYears: number | null;
   bio: string | null;
+  licenseStatus?: "missing" | "pending" | "verified" | "rejected";
+  licenseJurisdiction?: string | null;
+  licenseNumber?: string | null;
+  licenseReviewNote?: string | null;
   isSynthetic?: boolean;
   city?: string | null;
   state?: string | null;
@@ -32,7 +36,7 @@ export interface DoctorAvailability {
   endsAt: string;
 }
 
-export type DoctorProfileInput = Pick<DoctorProfile, "givenName" | "familyName" | "specialization" | "qualification" | "experienceYears" | "bio">;
+export type DoctorProfileInput = Pick<DoctorProfile, "givenName" | "familyName" | "specialization" | "qualification" | "experienceYears" | "bio" | "licenseJurisdiction" | "licenseNumber">;
 
 export interface DoctorRepository {
   listApproved(specialization?: string, filters?: { city?: string; mode?: "video" | "in_person"; maxFee?: number }): Promise<DoctorProfile[]>;
@@ -41,5 +45,6 @@ export interface DoctorRepository {
   findByUserId(userId: string): Promise<DoctorProfile | undefined>;
   saveProfile(userId: string, profile: DoctorProfileInput): Promise<DoctorProfile>;
   setApprovalStatus(doctorId: string, status: DoctorApprovalStatus, actorUserId: string, requestId: string): Promise<DoctorProfile | undefined>;
+  reviewLicense?(doctorId: string, status: "verified" | "rejected", note: string, actorUserId: string, requestId: string): Promise<DoctorProfile | undefined>;
   replaceAvailability(userId: string, slots: Array<{ startsAt: string; endsAt: string }>): Promise<DoctorAvailability[]>;
 }

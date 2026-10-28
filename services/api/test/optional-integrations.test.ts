@@ -59,7 +59,7 @@ describe("optional integration status and unavailable behavior", () => {
       expect.objectContaining({ name: "PostgreSQL", status: "healthy", detail: "Database query succeeded." }),
       expect.objectContaining({ name: "AI inference", status: "not_configured" })
     ]));
-    for (const name of ["SMTP email delivery", "Google sign-in", "Apple sign-in", "LiveKit video"]) {
+    for (const name of ["SMTP email delivery", "Google sign-in", "Facebook sign-in", "LiveKit video"]) {
       expect(response.body.data.services).toEqual(expect.arrayContaining([expect.objectContaining({ name, status: expect.stringMatching(/^(configured|not_configured)$/) })]));
     }
     expect(JSON.stringify(response.body.data.services)).not.toMatch(/client_secret|api_secret|private_key/i);

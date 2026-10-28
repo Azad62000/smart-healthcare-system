@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
+import { queueAdminSecurityAlert } from "../notifications/events.js";
 
 export type AdminMfaPurpose = "enroll" | "login";
 export interface AdminMfaState { enabled: boolean; secretEncrypted: string | null; pendingSecretEncrypted: string | null; lastTotpStep: number }
@@ -16,6 +17,7 @@ export interface AdminMfaRepository {
   completeEnrollment(token: string, userId: string, encryptedSecret: string, step: number, recoveryHashes: string[]): Promise<boolean>;
   completeTotpLogin(token: string, userId: string, step: number): Promise<boolean>;
   completeRecoveryLogin(token: string, userId: string, recoveryHash: string): Promise<boolean>;
+  completeEmailRecovery?(token: string, userId: string): Promise<string | undefined>;
 }
 
 function digest(token: string) { return createHash("sha256").update(token).digest("hex"); }
@@ -168,6 +170,24 @@ export class PostgresAdminMfaRepository implements AdminMfaRepository {
       await client.query("ROLLBACK");
       throw error;
     } finally { client.release(); }
+  }
+
+  async completeEmailRecovery(token: string, userId: string): Promise<string | undefined> {
+    const client = await this.db.connect();
+    try {
+      await client.query("BEGIN");
+      if (!await lockChallenge(client, token, userId, "login")) { await client.query("ROLLBACK"); return undefined; }
+      await client.query("UPDATE admin_mfa SET enabled=false,secret_encrypted=NULL,pending_secret_encrypted=NULL,last_totp_step=-1 WHERE user_id=$1", [userId]);
+      await client.query("DELETE FROM admin_mfa_recovery_codes WHERE user_id=$1", [userId]);
+      await client.query("DELETE FROM auth_sessions WHERE user_id=$1", [userId]);
+      await client.query("DELETE FROM auth_mfa_challenges WHERE user_id=$1", [userId]);
+      await queueAdminSecurityAlert(client, `admin-mfa-recovery:${userId}:${Date.now()}`, "Admin MFA recovery alert", "An Admin authenticator was reset using email recovery. If you did not request this, contact your system administrator.");
+      const nextChallenge = randomBytes(32).toString("base64url");
+      await client.query("INSERT INTO auth_mfa_challenges(token_hash,user_id,purpose,expires_at) VALUES($1,$2,'enroll',now()+interval '5 minutes')", [digest(nextChallenge), userId]);
+      await client.query("COMMIT");
+      return nextChallenge;
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
   }
 }
 

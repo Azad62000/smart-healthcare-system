@@ -13,6 +13,7 @@ class MigrationPool {
   schemaNonEmpty = false;
   schemaColumns = new Set(["users.email", "auth_sessions.expires_at"]);
   legacyConstraintDefinition = "CHECK (((char_length(body) >= 1) AND (char_length(body) <= 4000)))";
+  providerConstraintDefinitions = new Map<string, string>();
   preflightColumns = new Set([
     "care_messages.body",
     "appointment_documents.storage_key",
@@ -74,11 +75,15 @@ class MigrationPool {
             }) as T[]
           };
         }
-        if (sql.startsWith("SELECT pg_get_constraintdef")) {
+        if (sql.includes("conrelid='public.care_messages'::regclass AND conname='care_messages_body_check'")) {
           return { rows: [{ definition: this.legacyConstraintDefinition }] as T[] };
         }
         if (sql.includes("conname='care_messages_body_length_check'")) return { rows: [{ exists: false }] as T[] };
         if (sql.includes("FROM pg_constraint")) {
+          if (sql.includes("conname=$1")) {
+            const definition = this.providerConstraintDefinitions.get(String(values[0]));
+            return { rows: definition ? [{ definition }] as T[] : [] as T[] };
+          }
           return sql.includes("pg_get_constraintdef")
             ? { rows: [{ exists: true }] as T[] }
             : { rows: [] as T[] };
@@ -199,6 +204,39 @@ describe("tracked database migrations", () => {
       true
     )).rejects.toThrow("users.email");
     expect(pool.ledgerExists).toBe(false);
+  });
+
+  it("requires the Facebook provider constraints before baselining migration 018", async () => {
+    const pool = new MigrationPool();
+    pool.schemaNonEmpty = true;
+    pool.schemaColumns = new Set([
+      "users.email", "auth_sessions.expires_at", "patients.user_id", "doctors.approval_status",
+      "appointments.status", "consultation_records.note", "notifications.event_key",
+      "prescriptions.medication_name", "admin_audit_events.action", "admin_mfa.secret_encrypted",
+      "auth_sessions.mfa_verified", "auth_identities.provider", "users.email_verified",
+      "teleconsultations.room_name", "care_messages.body", "care_conversations.id",
+      "care_conversation_access_events.action", "appointment_documents.storage_key",
+      "doctors.synthetic_dataset_id", "auth_login_attempt_limits.bucket_hash",
+      "care_messages.encryption_version", "appointment_documents.storage_format",
+      "appointment_feedback.rating", "appointment_feedback.comment"
+    ]);
+    const migration018 = migration("018_auth_facebook_provider.sql", "ALTER PROVIDER CHECK");
+    const filenames = [
+      "001_auth.sql", "002_patients.sql", "003_doctors.sql", "004_appointments.sql",
+      "005_health_records.sql", "006_notifications.sql", "007_prescriptions.sql", "008_admin_audit.sql",
+      "009_admin_totp_mfa.sql", "010_auth_providers_and_recovery.sql", "011_telemedicine.sql",
+      "012_persistent_messaging.sql", "013_messaging_access_audit.sql", "014_demo_doctors_and_private_documents.sql",
+      "015_auth_login_rate_limits.sql", "016_medical_data_encryption.sql", "017_appointment_feedback.sql"
+    ];
+    const migrations = filenames.map((filename) => migration(filename, "SELECT 1"));
+    migrations.push(migration018);
+    await expect(baselineMigrations(pool.asPool(), migrations, migration018.filename, true))
+      .rejects.toThrow("constraint:auth_identities_provider_check.facebook");
+
+    pool.providerConstraintDefinitions.set("auth_identities_provider_check", "CHECK (provider IN ('google', 'apple', 'facebook'))");
+    pool.providerConstraintDefinitions.set("auth_oauth_flows_provider_check", "CHECK (provider IN ('google', 'apple', 'facebook'))");
+    await expect(baselineMigrations(pool.asPool(), migrations, migration018.filename, true))
+      .resolves.toHaveLength(18);
   });
 
   it("executes migration 010's reserved demo verification update only once", async () => {

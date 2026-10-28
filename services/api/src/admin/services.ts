@@ -51,10 +51,10 @@ export function createAdminServicesRouter(auth: AuthRepository, checkDatabase: (
     });
     const optionalIntegrations: Array<{ name: string; configured: boolean; readyDetail: string; missingDetail: string }> = [
       {
-        name: "SMTP email delivery",
+        name: "Email delivery",
         configured: isEmailDeliveryConfigured(),
-        readyDetail: "SMTP and email-code security settings are present; delivery connectivity has not been tested.",
-        missingDetail: "SMTP host, port, sender, and AUTH_OTP_PEPPER are required for email-code delivery."
+        readyDetail: "SMTP and email-code security settings are present; notification delivery runs through the background outbox.",
+        missingDetail: "SMTP host, port, sender, and AUTH_OTP_PEPPER are required for account verification, recovery, and email notifications."
       },
       {
         name: "Google sign-in",
@@ -63,10 +63,10 @@ export function createAdminServicesRouter(auth: AuthRepository, checkDatabase: (
         missingDetail: "Google OAuth client credentials are not configured."
       },
       {
-        name: "Apple sign-in",
-        configured: Boolean(config.APPLE_CLIENT_ID && config.APPLE_TEAM_ID && config.APPLE_KEY_ID && config.APPLE_PRIVATE_KEY),
-        readyDetail: "Apple OAuth credentials are present; provider sign-in has not been tested.",
-        missingDetail: "Apple OAuth client settings are not configured."
+        name: "Facebook sign-in",
+        configured: Boolean(config.FACEBOOK_APP_ID && config.FACEBOOK_APP_SECRET),
+        readyDetail: "Facebook OAuth credentials are present; provider sign-in has not been tested.",
+        missingDetail: "Facebook App ID and App Secret are not configured."
       },
       {
         name: "LiveKit video",

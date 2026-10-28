@@ -5,6 +5,7 @@ import type { AuthRepository, PublicUser } from "../auth/repository.js";
 import { requireAuthenticated, requireRoles } from "../auth/authorization.js";
 import { validateRequest } from "../middleware/validate-request.js";
 import { ApiRequestError } from "../request-error.js";
+import { queueAdminSecurityAlert } from "../notifications/events.js";
 
 type ManagedUser = { id: string; email: string; role: "Patient" | "Doctor" | "Admin"; status: "active" | "inactive" | "locked"; createdAt: string; patientProfileComplete?: boolean; doctorApprovalStatus?: string | null; specialization?: string | null; qualification?: string | null; experienceYears?: number | null; city?: string | null; consultationFeeInr?: number | null };
 type ManagedUserRow = { id: string; email: string; role: ManagedUser["role"]; status: ManagedUser["status"]; created_at: Date; patient_profile_complete: boolean; doctor_approval_status: string | null; specialization: string | null; qualification: string | null; experience_years: number | null; city: string | null; consultation_fee_inr: number | null };
@@ -79,6 +80,9 @@ export class PostgresAdminUserRepository implements AdminUserRepository {
          VALUES($1,$2,'user.status.changed',$3,$4,$5)`,
         [actorId, id, current.status, status, requestId]
       );
+      if (current.role === "Admin" && current.status !== status) {
+        await queueAdminSecurityAlert(client, `admin-status:${id}:${requestId}`, "Admin account security alert", "An Admin account status changed. Sign in to Smart Healthcare and review the audit history.");
+      }
       await client.query("COMMIT");
       return mapUser(updated.rows[0]!);
     } catch (error) {
