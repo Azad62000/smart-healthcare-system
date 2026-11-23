@@ -6,7 +6,7 @@ import { requireAuthenticated } from "../auth/authorization.js";
 import type { Appointment, AppointmentRepository } from "../appointments/types.js";
 import { ApiRequestError } from "../request-error.js";
 import { log } from "../logger.js";
-import { PrivateDocumentStorage } from "./storage.js";
+import type { AppointmentDocumentStorage, SavedDocument } from "./storage.js";
 import type { AppointmentDocumentRepository } from "./types.js";
 import { z } from "zod";
 
@@ -37,7 +37,7 @@ export function createAppointmentDocumentRouter(
   auth: AuthRepository,
   appointments: AppointmentRepository,
   documents: AppointmentDocumentRepository,
-  storage: PrivateDocumentStorage,
+  storage: AppointmentDocumentStorage,
   cookieName: string
 ): Router {
   const router = Router();
@@ -56,7 +56,7 @@ export function createAppointmentDocumentRouter(
   });
 
   router.post("/appointments/:appointmentId/documents", async (request, response, next) => {
-    let saved: Awaited<ReturnType<PrivateDocumentStorage["save"]>> | undefined;
+    let saved: SavedDocument | undefined;
     try {
       const user = currentUser(response);
       const params = appointmentParams.parse(request.params);

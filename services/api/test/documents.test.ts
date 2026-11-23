@@ -2,15 +2,18 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import cookieParser from "cookie-parser";
 import express from "express";
 import request from "supertest";
+import { Readable } from "node:stream";
+import type { Request } from "express";
 import type { AuthRepository, PublicUser, UserRecord, UserRole } from "../src/auth/repository.js";
 import type { Appointment, AppointmentRepository } from "../src/appointments/types.js";
 import { errorHandler } from "../src/middleware/error-handler.js";
 import { requestIdMiddleware } from "../src/middleware/request-id.js";
 import { createAppointmentDocumentRouter } from "../src/documents/routes.js";
-import { PrivateDocumentStorage } from "../src/documents/storage.js";
+import { PrivateDocumentStorage, R2DocumentStorage } from "../src/documents/storage.js";
 import { MedicalDataCrypto } from "../src/medical-data-crypto.js";
 import type {
   AppointmentDocument,
@@ -181,6 +184,42 @@ describe("private appointment documents", () => {
     expect(response.status).toBe(500);
     expect(documentRepository.stored).toBeUndefined();
     expect(await readdir(directory)).toEqual([]);
+  });
+
+  it("stores encrypted document bytes in R2 and decrypts them on retrieval", async () => {
+    const objects = new Map<string, Buffer>();
+    const fakeClient = {
+      async send(command: unknown) {
+        if (command instanceof PutObjectCommand) {
+          objects.set(command.input.Key!, Buffer.from(command.input.Body as Uint8Array));
+          return {};
+        }
+        if (command instanceof GetObjectCommand) {
+          const object = objects.get(command.input.Key!);
+          if (!object) throw new Error("object not found");
+          return { Body: { transformToByteArray: async () => new Uint8Array(object) } };
+        }
+        if (command instanceof DeleteObjectCommand) {
+          objects.delete(command.input.Key!);
+          return {};
+        }
+        throw new Error("unexpected storage command");
+      }
+    } as unknown as S3Client;
+    const r2 = new R2DocumentStorage("account", "synthetic-bucket", "access", "secret", 1_048_576,
+      MedicalDataCrypto.fromConfiguration(`test:${"a".repeat(64)}`), fakeClient);
+    const pdf = Buffer.from("%PDF-1.7\nsynthetic R2 fixture");
+    const uploadRequest = Object.assign(Readable.from([pdf]), { headers: { "content-type": "application/pdf" } }) as Request;
+    const saved = await r2.save(uploadRequest, "synthetic-r2.pdf");
+    const encrypted = objects.get(`${saved.storageKey}.enc`)!;
+    expect(encrypted.toString()).not.toContain("%PDF-1.7");
+    const downloaded: Buffer[] = [];
+    for await (const chunk of await r2.open(saved.storageKey, "application/pdf", saved.storageFormat)) {
+      downloaded.push(Buffer.from(chunk));
+    }
+    expect(Buffer.concat(downloaded)).toEqual(pdf);
+    await r2.remove(saved.storageKey, saved.mediaType);
+    expect(objects.has(`${saved.storageKey}.enc`)).toBe(false);
   });
 
   it("continues to read explicitly marked legacy plaintext files during migration", async () => {

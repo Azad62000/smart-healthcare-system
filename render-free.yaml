@@ -1,0 +1,56 @@
+services:
+  - type: web
+    name: smart-healthcare-api-demo
+    runtime: node
+    plan: free
+    autoDeploy: false
+    buildCommand: npm ci && npm run build -w @healthcare/shared && npm run build -w @healthcare/api
+    startCommand: npm run start -w @healthcare/api
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: 24.22.1
+      - key: API_HOST
+        value: 0.0.0.0
+      - key: WEB_ORIGIN
+        sync: false
+      - key: LOG_LEVEL
+        value: info
+      - key: DATABASE_URL
+        sync: false
+      - key: SESSION_COOKIE_SECURE
+        value: "true"
+      - key: SESSION_COOKIE_SAME_SITE
+        value: "none"
+      - key: SESSION_TTL_HOURS
+        value: "12"
+      - key: MEDICAL_DATA_ENCRYPTION_KEYS
+        sync: false
+      - key: ADMIN_MFA_ENCRYPTION_KEY
+        sync: false
+      - key: AUTH_OTP_PEPPER
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "2525"
+      - key: SMTP_SECURE
+        value: "false"
+      - key: SMTP_FROM
+        sync: false
+      - key: SMTP_FROM_NAME
+        value: Smart Healthcare Demo
+      - key: DOCUMENT_STORAGE_DRIVER
+        value: r2
+      - key: DOCUMENT_MAX_BYTES
+        value: "10000000"
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_BUCKET_NAME
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false

@@ -15,6 +15,7 @@ interface OAuthRouteOptions {
   mfaEncryptionKey?: string;
   sessionTtlHours: number;
   secureCookie: boolean;
+  sessionCookieSameSite?: "lax" | "none";
   webOrigin: string;
   apiPublicUrl?: string;
 }
@@ -212,7 +213,7 @@ export function createOAuthRouter(options: OAuthRouteOptions): Router {
         response.cookie(mfaCookieName, challenge, {
           httpOnly: true,
           secure: options.secureCookie,
-          sameSite: "lax",
+          sameSite: options.sessionCookieSameSite ?? "lax",
           path: "/api/v1/auth",
           maxAge: 5 * 60 * 1000
         });
@@ -225,7 +226,7 @@ export function createOAuthRouter(options: OAuthRouteOptions): Router {
       response.cookie(sessionCookieName, token, {
         httpOnly: true,
         secure: options.secureCookie,
-        sameSite: "lax",
+        sameSite: options.sessionCookieSameSite ?? "lax",
         path: "/",
         maxAge: options.sessionTtlHours * 60 * 60 * 1000
       });

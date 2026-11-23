@@ -18,21 +18,23 @@ This matrix describes capabilities represented in the current repository. “Imp
 | Messaging | Implemented | Persistent Patient–Doctor conversations use authenticated REST/Socket.IO, relationship authorization, pagination, read cursors, idempotent sends, and metadata-only access audits. The separate general `/chat` AI placeholder is unavailable. |
 | Video | Configuration-dependent | Appointment-linked LiveKit consultation routes and UI exist. Calls require LiveKit configuration; attendance timestamps are client-reported, not provider-verified. |
 | AI | Future / unavailable | Prediction endpoints explicitly report that no inference service is configured and do not fabricate results. Rule-based doctor recommendations are optional directory matching, not clinical AI. |
-| Scale/deployment expansion | Future work | Native mobile, cloud deployment, containers/orchestration, independent service deployment, and autoscaling are not current implementation scope. |
+| Scale/deployment expansion | Demo deployment supported | A separate free-tier Render Blueprint and Vercel/Neon/R2 runbook support a synthetic demo. This does not establish production readiness, compliance, backups, or autoscaling. Native mobile and orchestration remain future work. |
 
 See [Known implementation gaps](./docs/architecture.md#known-implementation-gaps) and the domain sections below for details and operational caveats.
+
+For free-tier hosting, see [the deployment runbook](./docs/free-tier-deployment.md). The deployment uses a fresh Neon database and synthetic data only; it does not use the local demo seed.
 
 The matrix was checked against API route/service modules under `services/api/src`, web routes under `apps/web/app`, migrations `001`–`023`, and the API, UI, and end-to-end test sources. These files establish repository behavior only; they do not establish the migration state of a running database or the availability of external providers.
 
 ## Requirements
 
-- Node.js 20+
+- Node.js 24+
 - npm 10+
 - PostgreSQL 14+ for authentication, service data, migrations, and demo fixtures
 
 ## Setup
 
-1. Install Node.js 20+, npm 10+, and PostgreSQL 14+.
+1. Install Node.js 24+, npm 10+, and PostgreSQL 14+.
 2. On macOS with Homebrew, install and start PostgreSQL 16:
 
    ```sh
@@ -508,7 +510,7 @@ Security review notes: request schemas reject undeclared fields; registration as
 - `npm run build`: production builds for shared contracts, API, and web app.
 - `npm run db:migrate -w @healthcare/api`: apply all SQL migrations to the configured PostgreSQL database.
 
-AI is intentionally not part of the current workflow. If added later, inference will live in an optional Python/FastAPI service so core healthcare features remain available without it. Native mobile apps and cloud deployment/scaling are future-report items only; they are not included in the local demo.
+AI features remain optional and configuration-dependent. The free-tier runbook includes a separate lightweight QDiabetes FastAPI deployment; heavier FracAtlas and symptom-classifier inference are not reliable on free Render compute. Native mobile, orchestration, and autoscaling remain future work. See [the deployment runbook](./docs/free-tier-deployment.md) for the synthetic free-tier demo setup.
 
 ### Local verification results (2026-10-22, expanded portal work)
 

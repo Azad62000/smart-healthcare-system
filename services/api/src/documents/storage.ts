@@ -5,6 +5,7 @@ import { basename, extname, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { Request } from "express";
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { ApiRequestError } from "../request-error.js";
 import { documentAdditionalData, MedicalDataCrypto } from "../medical-data-crypto.js";
 import type { DocumentMediaType } from "./types.js";
@@ -31,7 +32,60 @@ export interface SavedDocument {
   storageFormat: "aes-256-gcm-v1";
 }
 
-export class PrivateDocumentStorage {
+export interface AppointmentDocumentStorage {
+  save(request: Request, filenameHeader: string | undefined): Promise<SavedDocument>;
+  open(storageKey: string, mediaType: DocumentMediaType, storageFormat: DocumentStorageFormat): Promise<Readable>;
+  remove(storageKey: string, mediaType: DocumentMediaType): Promise<void>;
+}
+
+interface ValidatedDocumentUpload {
+  filename: string;
+  mediaType: DocumentMediaType;
+  bytes: Buffer;
+}
+
+async function readDocumentUpload(request: Request, filenameHeader: string | undefined, maxBytes: number): Promise<ValidatedDocumentUpload> {
+  let filename: string | undefined;
+  try { filename = filenameHeader ? decodeURIComponent(filenameHeader).trim() : undefined; }
+  catch { throw new ApiRequestError(400, "INVALID_DOCUMENT_NAME", "Provide a supported filename without a path."); }
+  if (!filename || filename.length > 255 || basename(filename) !== filename ||
+      /[\\/\u0000-\u001f\u007f]/.test(filename)) {
+    throw new ApiRequestError(400, "INVALID_DOCUMENT_NAME", "Provide a supported filename without a path.");
+  }
+  const mediaType = extensionTypes[extname(filename).toLowerCase()];
+  const claimedType = request.headers["content-type"]?.split(";")[0]?.trim().toLowerCase();
+  if (!mediaType || claimedType !== mediaType) {
+    throw new ApiRequestError(415, "UNSUPPORTED_DOCUMENT_TYPE", "Only matching PDF, JPEG, and PNG files are accepted.");
+  }
+
+  let byteSize = 0;
+  let signature = Buffer.alloc(0);
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    byteSize += buffer.length;
+    if (byteSize > maxBytes) throw new ApiRequestError(413, "DOCUMENT_TOO_LARGE", "The document exceeds the configured upload limit.");
+    if (signature.length < 8) signature = Buffer.concat([signature, buffer.subarray(0, 8 - signature.length)]);
+    chunks.push(buffer);
+  }
+  const bytes = Buffer.concat(chunks, byteSize);
+  if (byteSize === 0 || !matchesSignature(signature, mediaType)) {
+    throw new ApiRequestError(415, "INVALID_DOCUMENT_CONTENT", "The file contents do not match the selected document type.");
+  }
+  return { filename, mediaType, bytes };
+}
+
+function matchesSignature(signature: Buffer, mediaType: DocumentMediaType): boolean {
+  if (mediaType === "application/pdf") return signature.subarray(0, 5).toString("ascii") === "%PDF-";
+  if (mediaType === "image/png") return signature.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  return signature.length >= 3 && signature[0] === 0xff && signature[1] === 0xd8 && signature[2] === 0xff;
+}
+
+function assertStorageKey(storageKey: string): void {
+  if (!/^[0-9a-f-]{36}$/i.test(storageKey)) throw new Error("Invalid private document storage key.");
+}
+
+export class PrivateDocumentStorage implements AppointmentDocumentStorage {
   private readonly directory: string;
 
   constructor(directory: string, private readonly maxBytes: number, private readonly crypto: MedicalDataCrypto) {
@@ -39,49 +93,20 @@ export class PrivateDocumentStorage {
   }
 
   async save(request: Request, filenameHeader: string | undefined): Promise<SavedDocument> {
-    let filename: string | undefined;
-    try { filename = filenameHeader ? decodeURIComponent(filenameHeader).trim() : undefined; }
-    catch { throw new ApiRequestError(400, "INVALID_DOCUMENT_NAME", "Provide a supported filename without a path."); }
-    if (!filename || filename.length > 255 || basename(filename) !== filename ||
-        /[\\/\u0000-\u001f\u007f]/.test(filename)) {
-      throw new ApiRequestError(400, "INVALID_DOCUMENT_NAME", "Provide a supported filename without a path.");
-    }
-    const expectedType = extensionTypes[extname(filename).toLowerCase()];
-    const claimedType = request.headers["content-type"]?.split(";")[0]?.trim().toLowerCase();
-    if (!expectedType || claimedType !== expectedType) {
-      throw new ApiRequestError(415, "UNSUPPORTED_DOCUMENT_TYPE", "Only matching PDF, JPEG, and PNG files are accepted.");
-    }
-
+    const upload = await readDocumentUpload(request, filenameHeader, this.maxBytes);
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
     await chmod(this.directory, 0o700);
     const storageKey = randomUUID();
     const temporaryPath = resolve(this.directory, `${storageKey}.enc.uploading`);
     const finalPath = resolve(this.directory, `${storageKey}.enc`);
-    let byteSize = 0;
-    let signature = Buffer.alloc(0);
-    const chunks: Buffer[] = [];
-    async function collectChunks(maxBytes: number) {
-      for await (const chunk of request) {
-        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-        byteSize += buffer.length;
-        if (byteSize > maxBytes) throw new ApiRequestError(413, "DOCUMENT_TOO_LARGE", "The document exceeds the configured upload limit.");
-        if (signature.length < 8) signature = Buffer.concat([signature, buffer.subarray(0, 8 - signature.length)]);
-        chunks.push(buffer);
-      }
-    }
-
     try {
-      await collectChunks(this.maxBytes);
-      if (byteSize === 0 || !this.matchesSignature(signature, expectedType)) {
-        throw new ApiRequestError(415, "INVALID_DOCUMENT_CONTENT", "The file contents do not match the selected document type.");
-      }
       const encrypted = this.crypto.encryptBytes(
-        Buffer.concat(chunks, byteSize),
-        documentAdditionalData(storageKey, expectedType)
+        upload.bytes,
+        documentAdditionalData(storageKey, upload.mediaType)
       );
       await pipeline(Readable.from([encrypted]), createWriteStream(temporaryPath, { flags: "wx", mode: 0o600 }));
       await renamePrivateFile(temporaryPath, finalPath);
-      return { storageKey, filename, mediaType: expectedType, byteSize, storageFormat: "aes-256-gcm-v1" };
+      return { storageKey, filename: upload.filename, mediaType: upload.mediaType, byteSize: upload.bytes.length, storageFormat: "aes-256-gcm-v1" };
     } catch (error) {
       await rm(temporaryPath, { force: true });
       await rm(finalPath, { force: true });
@@ -94,35 +119,76 @@ export class PrivateDocumentStorage {
     mediaType: DocumentMediaType,
     storageFormat: DocumentStorageFormat
   ): Promise<Readable> {
-    this.assertStorageKey(storageKey);
+    assertStorageKey(storageKey);
     const plaintext = storageFormat === "aes-256-gcm-v1"
       ? this.crypto.decryptBytes(
         await readFile(resolve(this.directory, `${storageKey}.enc`)),
         documentAdditionalData(storageKey, mediaType)
       )
       : await readFile(resolve(this.directory, `${storageKey}${mediaExtensions[mediaType]}`));
-    if (!this.matchesSignature(plaintext.subarray(0, 8), mediaType)) {
+    if (!matchesSignature(plaintext.subarray(0, 8), mediaType)) {
       throw new Error("Stored medical document failed integrity validation.");
     }
     return Readable.from([plaintext]);
   }
 
   async remove(storageKey: string, mediaType: DocumentMediaType): Promise<void> {
-    this.assertStorageKey(storageKey);
+    assertStorageKey(storageKey);
     await Promise.all([
       rm(resolve(this.directory, `${storageKey}.enc`), { force: true }),
       rm(resolve(this.directory, `${storageKey}${mediaExtensions[mediaType]}`), { force: true })
     ]);
   }
 
-  private assertStorageKey(storageKey: string): void {
-    if (!/^[0-9a-f-]{36}$/i.test(storageKey)) throw new Error("Invalid private document storage key.");
+}
+
+export class R2DocumentStorage implements AppointmentDocumentStorage {
+  private readonly client: S3Client;
+
+  constructor(
+    accountId: string,
+    private readonly bucket: string,
+    accessKeyId: string,
+    secretAccessKey: string,
+    private readonly maxBytes: number,
+    private readonly crypto: MedicalDataCrypto,
+    client?: S3Client
+  ) {
+    this.client = client ?? new S3Client({
+      region: "auto",
+      endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
+      credentials: { accessKeyId, secretAccessKey }
+    });
   }
 
-  private matchesSignature(signature: Buffer, mediaType: DocumentMediaType): boolean {
-    if (mediaType === "application/pdf") return signature.subarray(0, 5).toString("ascii") === "%PDF-";
-    if (mediaType === "image/png") return signature.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
-    return signature.length >= 3 && signature[0] === 0xff && signature[1] === 0xd8 && signature[2] === 0xff;
+  async save(request: Request, filenameHeader: string | undefined): Promise<SavedDocument> {
+    const upload = await readDocumentUpload(request, filenameHeader, this.maxBytes);
+    const storageKey = randomUUID();
+    const encrypted = this.crypto.encryptBytes(upload.bytes, documentAdditionalData(storageKey, upload.mediaType));
+    await this.client.send(new PutObjectCommand({
+      Bucket: this.bucket,
+      Key: `${storageKey}.enc`,
+      Body: encrypted,
+      ContentType: "application/octet-stream"
+    }));
+    return { storageKey, filename: upload.filename, mediaType: upload.mediaType, byteSize: upload.bytes.length, storageFormat: "aes-256-gcm-v1" };
+  }
+
+  async open(storageKey: string, mediaType: DocumentMediaType, storageFormat: DocumentStorageFormat): Promise<Readable> {
+    assertStorageKey(storageKey);
+    const object = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: storageFormat === "aes-256-gcm-v1" ? `${storageKey}.enc` : `${storageKey}${mediaExtensions[mediaType]}` }));
+    if (!object.Body) throw new Error("Stored medical document was empty.");
+    const payload = Buffer.from(await object.Body.transformToByteArray());
+    const plaintext = storageFormat === "aes-256-gcm-v1"
+      ? this.crypto.decryptBytes(payload, documentAdditionalData(storageKey, mediaType))
+      : payload;
+    if (!matchesSignature(plaintext.subarray(0, 8), mediaType)) throw new Error("Stored medical document failed integrity validation.");
+    return Readable.from([plaintext]);
+  }
+
+  async remove(storageKey: string, _mediaType: DocumentMediaType): Promise<void> {
+    assertStorageKey(storageKey);
+    await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: `${storageKey}.enc` }));
   }
 }
 

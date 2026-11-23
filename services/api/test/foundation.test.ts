@@ -43,6 +43,28 @@ describe("validated environment", () => {
     };
     expect(parseEnvironment({ ...productionHttps, LIVEKIT_URL: "ws://video.example.test" }).success).toBe(false);
     expect(parseEnvironment({ ...productionHttps, LIVEKIT_URL: "wss://video.example.test" }).success).toBe(true);
+    const renderEnvironment = parseEnvironment({
+      NODE_ENV: "production",
+      PORT: "10000",
+      RENDER_EXTERNAL_URL: "https://api.example.test",
+      DATABASE_URL: "postgresql://localhost:5432/test",
+      WEB_ORIGIN: "https://app.example.test",
+      SESSION_COOKIE_SECURE: "true",
+      SESSION_COOKIE_SAME_SITE: "none"
+    });
+    expect(renderEnvironment.success && renderEnvironment.data).toMatchObject({ API_HOST: "0.0.0.0", API_PORT: 10000, API_PUBLIC_URL: "https://api.example.test", SESSION_COOKIE_SAME_SITE: "none" });
+    expect(parseEnvironment({
+      DATABASE_URL: "postgresql://localhost:5432/test",
+      DOCUMENT_STORAGE_DRIVER: "r2"
+    }).success).toBe(false);
+    expect(parseEnvironment({
+      DATABASE_URL: "postgresql://localhost:5432/test",
+      DOCUMENT_STORAGE_DRIVER: "r2",
+      R2_ACCOUNT_ID: "account",
+      R2_BUCKET_NAME: "synthetic-demo",
+      R2_ACCESS_KEY_ID: "synthetic-access",
+      R2_SECRET_ACCESS_KEY: "synthetic-secret"
+    }).success).toBe(true);
     if (defaults.success) {
       expect(defaults.data.API_PORT).toBe(4000);
       expect(defaults.data.DOCTOR_RECOMMENDATIONS_ENABLED).toBe(false);

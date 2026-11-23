@@ -41,7 +41,7 @@ import { createAdminAppointmentRouter } from "./appointments/admin-routes.js";
 import { createTeleconsultationRouter } from "./teleconsultations/routes.js";
 import { createAppointmentDocumentRouter } from "./documents/routes.js";
 import { PostgresAppointmentDocumentRepository } from "./documents/types.js";
-import { PrivateDocumentStorage } from "./documents/storage.js";
+import { PrivateDocumentStorage, R2DocumentStorage } from "./documents/storage.js";
 import { MedicalDataCrypto } from "./medical-data-crypto.js";
 import { createFeedbackRouter } from "./feedback/routes.js";
 import { PostgresFeedbackRepository } from "./feedback/repository.js";
@@ -62,6 +62,7 @@ app.use("/health", healthRouter);
 app.use("/api/v1/auth", createAuthRouter(new PostgresAuthRepository(pool), {
   sessionTtlHours: config.SESSION_TTL_HOURS,
   secureCookie: config.SESSION_COOKIE_SECURE,
+  sessionCookieSameSite: config.SESSION_COOKIE_SAME_SITE,
   mfaRepository: new PostgresAdminMfaRepository(pool),
   mfaEncryptionKey: config.ADMIN_MFA_ENCRYPTION_KEY,
   emailCodeRepository: new PostgresEmailCodeRepository(pool),
@@ -100,11 +101,14 @@ app.use("/api/v1/feedback", createFeedbackRouter(
   new PostgresFeedbackRepository(pool),
   sessionCookieName
 ));
+const documentStorage = config.DOCUMENT_STORAGE_DRIVER === "r2"
+  ? new R2DocumentStorage(config.R2_ACCOUNT_ID!, config.R2_BUCKET_NAME!, config.R2_ACCESS_KEY_ID!, config.R2_SECRET_ACCESS_KEY!, config.DOCUMENT_MAX_BYTES, medicalDataCrypto)
+  : new PrivateDocumentStorage(config.DOCUMENT_STORAGE_DIR ?? ".private-documents", config.DOCUMENT_MAX_BYTES, medicalDataCrypto);
 app.use("/api/v1", createAppointmentDocumentRouter(
   new PostgresAuthRepository(pool),
   appointmentRepository,
   new PostgresAppointmentDocumentRepository(pool),
-  new PrivateDocumentStorage(config.DOCUMENT_STORAGE_DIR ?? ".private-documents", config.DOCUMENT_MAX_BYTES, medicalDataCrypto),
+  documentStorage,
   sessionCookieName
 ));
 app.use("/api/v1/teleconsultations", createTeleconsultationRouter(

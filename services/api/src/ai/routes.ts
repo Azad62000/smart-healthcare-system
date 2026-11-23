@@ -217,7 +217,7 @@ export function createAiRouter(auth: AuthRepository, cookieName: string, geminiR
   });
   router.post("/qdiabetes/model-c", validateRequest({ body: qdiabetesSchema }), async (request, response, next) => {
     try {
-      const url = process.env.QDIABETES_SERVICE_URL ?? "http://127.0.0.1:8001";
+      const url = config.QDIABETES_SERVICE_URL;
       const upstream = await fetch(`${url}/risk`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(request.body), signal: AbortSignal.timeout(5000) });
       if (!upstream.ok) throw new Error(`QDiabetes service returned ${upstream.status}`);
       const data = await upstream.json();

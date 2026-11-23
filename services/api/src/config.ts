@@ -19,6 +19,7 @@ const environmentSchema = z.object({
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
   DATABASE_URL: z.string().url(),
   SESSION_COOKIE_SECURE: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
+  SESSION_COOKIE_SAME_SITE: z.enum(["lax", "none"]).default("lax"),
   SESSION_TTL_HOURS: z.coerce.number().int().min(1).max(168).default(12),
   MEDICAL_DATA_ENCRYPTION_KEYS: z.string().min(1),
   ADMIN_MFA_ENCRYPTION_KEY: z.preprocess((value) => value === "" ? undefined : value, z.string().regex(/^[a-fA-F0-9]{64}$/).optional()),
@@ -44,9 +45,15 @@ const environmentSchema = z.object({
   LIVEKIT_API_SECRET: optionalString,
   TELECONSULTATION_JOIN_WINDOW_MINUTES: z.coerce.number().int().min(0).max(120).default(15),
   DOCTOR_RECOMMENDATIONS_ENABLED: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
+  DOCUMENT_STORAGE_DRIVER: z.enum(["local", "r2"]).default("local"),
   DOCUMENT_STORAGE_DIR: z.preprocess((value) => value === "" ? undefined : value, z.string().trim().min(1).optional()),
   DOCUMENT_MAX_BYTES: z.coerce.number().int().min(1_048_576).max(25_000_000).default(10_000_000),
+  R2_ACCOUNT_ID: optionalString,
+  R2_BUCKET_NAME: optionalString,
+  R2_ACCESS_KEY_ID: optionalString,
+  R2_SECRET_ACCESS_KEY: optionalString,
   ABDM_DRUG_REGISTRY_API_KEY: optionalString,
+  QDIABETES_SERVICE_URL: z.preprocess((value) => value === "" ? undefined : value, z.string().url().default("http://127.0.0.1:8001")),
   SYMPTOM_CLASSIFIER_SERVICE_URL: z.preprocess((value) => value === "" ? undefined : value, z.string().url().optional()),
   FRACATLAS_SERVICE_URL: z.preprocess((value) => value === "" ? undefined : value, z.string().url().default("http://127.0.0.1:8003")),
   GEMINI_API_KEY: optionalString,
@@ -63,19 +70,30 @@ const environmentSchema = z.object({
   }
   if (value.NODE_ENV === "production") {
     if (!value.SESSION_COOKIE_SECURE) context.addIssue({ code: "custom", path: ["SESSION_COOKIE_SECURE"], message: "Secure session cookies are required in production." });
-    if (!value.API_PUBLIC_URL?.startsWith("https://")) context.addIssue({ code: "custom", path: ["API_PUBLIC_URL"], message: "A public HTTPS API URL is required in production." });
+    if (value.API_PUBLIC_URL && !value.API_PUBLIC_URL.startsWith("https://")) context.addIssue({ code: "custom", path: ["API_PUBLIC_URL"], message: "The public API URL must use HTTPS in production." });
     if (!value.WEB_ORIGIN.startsWith("https://")) context.addIssue({ code: "custom", path: ["WEB_ORIGIN"], message: "The web origin must use HTTPS in production." });
     if (value.LIVEKIT_URL && !value.LIVEKIT_URL.startsWith("wss://")) context.addIssue({ code: "custom", path: ["LIVEKIT_URL"], message: "LiveKit must use WSS in production." });
   }
   if (Boolean(value.FACEBOOK_APP_ID) !== Boolean(value.FACEBOOK_APP_SECRET)) {
     context.addIssue({ code: "custom", path: ["FACEBOOK_APP_ID"], message: "FACEBOOK_APP_ID and FACEBOOK_APP_SECRET must be configured together." });
   }
+  const r2Configuration = [value.R2_ACCOUNT_ID, value.R2_BUCKET_NAME, value.R2_ACCESS_KEY_ID, value.R2_SECRET_ACCESS_KEY];
+  if (value.DOCUMENT_STORAGE_DRIVER === "r2" && r2Configuration.some((entry) => !entry)) {
+    context.addIssue({ code: "custom", path: ["DOCUMENT_STORAGE_DRIVER"], message: "R2 document storage requires account ID, bucket name, access key ID, and secret access key." });
+  }
+  if (value.DOCUMENT_STORAGE_DRIVER === "local" && r2Configuration.some(Boolean)) {
+    context.addIssue({ code: "custom", path: ["DOCUMENT_STORAGE_DRIVER"], message: "Choose R2 document storage when R2 credentials are configured." });
+  }
 });
 
-const environmentKeys = ["NODE_ENV", "API_HOST", "API_PORT", "WEB_ORIGIN", "LOG_LEVEL", "DATABASE_URL", "SESSION_COOKIE_SECURE", "SESSION_TTL_HOURS", "MEDICAL_DATA_ENCRYPTION_KEYS", "ADMIN_MFA_ENCRYPTION_KEY", "AUTH_OTP_PEPPER", "TRUSTED_PROXY_ADDRESSES", "API_PUBLIC_URL", "SMTP_HOST", "SMTP_PORT", "SMTP_SECURE", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM", "SMTP_FROM_NAME", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "FACEBOOK_APP_ID", "FACEBOOK_APP_SECRET", "FACEBOOK_GRAPH_API_VERSION", "LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "TELECONSULTATION_JOIN_WINDOW_MINUTES", "DOCTOR_RECOMMENDATIONS_ENABLED", "DOCUMENT_STORAGE_DIR", "DOCUMENT_MAX_BYTES", "ABDM_DRUG_REGISTRY_API_KEY", "SYMPTOM_CLASSIFIER_SERVICE_URL", "FRACATLAS_SERVICE_URL", "GEMINI_API_KEY", "GEMINI_MODEL"] as const;
+const environmentKeys = ["NODE_ENV", "API_HOST", "API_PORT", "WEB_ORIGIN", "LOG_LEVEL", "DATABASE_URL", "SESSION_COOKIE_SECURE", "SESSION_COOKIE_SAME_SITE", "SESSION_TTL_HOURS", "MEDICAL_DATA_ENCRYPTION_KEYS", "ADMIN_MFA_ENCRYPTION_KEY", "AUTH_OTP_PEPPER", "TRUSTED_PROXY_ADDRESSES", "API_PUBLIC_URL", "SMTP_HOST", "SMTP_PORT", "SMTP_SECURE", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM", "SMTP_FROM_NAME", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "FACEBOOK_APP_ID", "FACEBOOK_APP_SECRET", "FACEBOOK_GRAPH_API_VERSION", "LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "TELECONSULTATION_JOIN_WINDOW_MINUTES", "DOCTOR_RECOMMENDATIONS_ENABLED", "DOCUMENT_STORAGE_DRIVER", "DOCUMENT_STORAGE_DIR", "DOCUMENT_MAX_BYTES", "R2_ACCOUNT_ID", "R2_BUCKET_NAME", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "ABDM_DRUG_REGISTRY_API_KEY", "QDIABETES_SERVICE_URL", "SYMPTOM_CLASSIFIER_SERVICE_URL", "FRACATLAS_SERVICE_URL", "GEMINI_API_KEY", "GEMINI_MODEL"] as const;
 
 function applicationEnvironment(environment: NodeJS.ProcessEnv) {
-  return Object.fromEntries(environmentKeys.flatMap((key) => environment[key] === undefined ? [] : [[key, environment[key]]]));
+  const values = Object.fromEntries(environmentKeys.flatMap((key) => environment[key] === undefined ? [] : [[key, environment[key]]]));
+  if (environment.API_HOST === undefined) values.API_HOST = environment.NODE_ENV === "production" ? "0.0.0.0" : "localhost";
+  if (environment.API_PORT === undefined && environment.PORT !== undefined) values.API_PORT = environment.PORT;
+  if (environment.API_PUBLIC_URL === undefined && environment.RENDER_EXTERNAL_URL !== undefined) values.API_PUBLIC_URL = environment.RENDER_EXTERNAL_URL;
+  return values;
 }
 
 const parsed = environmentSchema.safeParse(applicationEnvironment(process.env));
@@ -88,8 +106,8 @@ if (parsed.data.NODE_ENV === "production" && !parsed.data.ADMIN_MFA_ENCRYPTION_K
 if (parsed.data.NODE_ENV === "production" && !parsed.data.AUTH_OTP_PEPPER) {
   throw new Error("Invalid environment configuration: AUTH_OTP_PEPPER is required in production.");
 }
-if (parsed.data.NODE_ENV === "production" && (!parsed.data.SESSION_COOKIE_SECURE || !parsed.data.API_PUBLIC_URL?.startsWith("https://") || !parsed.data.WEB_ORIGIN.startsWith("https://"))) {
-  throw new Error("Invalid environment configuration: production requires secure cookies and HTTPS API and web URLs.");
+if (parsed.data.NODE_ENV === "production" && (!parsed.data.SESSION_COOKIE_SECURE || !parsed.data.WEB_ORIGIN.startsWith("https://"))) {
+  throw new Error("Invalid environment configuration: production requires secure cookies and an HTTPS web URL.");
 }
 if (parsed.data.NODE_ENV === "production" && (!parsed.data.SMTP_HOST || !parsed.data.SMTP_PORT || !parsed.data.SMTP_FROM)) {
   throw new Error("Invalid environment configuration: SMTP_HOST, SMTP_PORT, and SMTP_FROM are required in production.");

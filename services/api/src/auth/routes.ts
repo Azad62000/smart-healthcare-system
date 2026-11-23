@@ -38,6 +38,7 @@ const invalidMfaCode = () => new ApiRequestError(401, "MFA_INVALID_CODE", "The v
 export interface AuthRouteOptions {
   sessionTtlHours: number;
   secureCookie: boolean;
+  sessionCookieSameSite?: "lax" | "none";
   cookieName?: string;
   mfaRepository?: AdminMfaRepository;
   mfaEncryptionKey?: string;
@@ -54,7 +55,7 @@ function setSessionCookie(response: Parameters<import("express").RequestHandler>
   response.cookie(options.cookieName ?? sessionCookieName, token, {
     httpOnly: true,
     secure: options.secureCookie,
-    sameSite: "lax",
+    sameSite: options.sessionCookieSameSite ?? "lax",
     path: "/",
     maxAge: options.sessionTtlHours * 60 * 60 * 1000
   });
@@ -64,14 +65,14 @@ function setMfaCookie(response: Parameters<import("express").RequestHandler>[1],
   response.cookie(adminMfaCookieName, token, {
     httpOnly: true,
     secure: options.secureCookie,
-    sameSite: "lax",
+    sameSite: options.sessionCookieSameSite ?? "lax",
     path: "/api/v1/auth",
     maxAge: 5 * 60 * 1000
   });
 }
 
 function clearMfaCookie(response: Parameters<import("express").RequestHandler>[1], options: AuthRouteOptions) {
-  response.clearCookie(adminMfaCookieName, { httpOnly: true, secure: options.secureCookie, sameSite: "lax", path: "/api/v1/auth" });
+  response.clearCookie(adminMfaCookieName, { httpOnly: true, secure: options.secureCookie, sameSite: options.sessionCookieSameSite ?? "lax", path: "/api/v1/auth" });
 }
 
 function publicUser(user: PublicUser) { return { id: user.id, email: user.email, role: user.role }; }
@@ -91,6 +92,7 @@ export function createAuthRouter(repository: AuthRepository, options: AuthRouteO
       mfaEncryptionKey: options.mfaEncryptionKey,
       sessionTtlHours: options.sessionTtlHours,
       secureCookie: options.secureCookie,
+      sessionCookieSameSite: options.sessionCookieSameSite,
       webOrigin: options.webOrigin,
       apiPublicUrl: options.apiPublicUrl
     }));
