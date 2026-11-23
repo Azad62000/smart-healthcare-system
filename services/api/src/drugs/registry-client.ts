@@ -1,0 +1,21 @@
+import { ApiRequestError } from "../request-error.js";
+
+// Read-only public app key shipped by the official ABDM Drug Registry portal for its catalog APIs.
+// It is not a user secret; set ABDM_DRUG_REGISTRY_API_KEY to override it if ABDM rotates the key.
+const publicPortalApiKey = 'eyJ4NXQiOiJOMkpqTWpOaU0yRXhZalJrTnpaalptWTFZVEF4Tm1GbE5qZzRPV1UxWVdRMll6YzFObVk1TlE9PSIsImtpZCI6ImdhdGV3YXlfY2VydGlmaWNhdGVfYWxpYXMiLCJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJhZG1pbkBjYXJib24uc3VwZXIiLCJhcHBsaWNhdGlvbiI6eyJvd25lciI6ImFkbWluIiwidGllclF1b3RhVHlwZSI6bnVsbCwidGllciI6IlVubGltaXRlZCIsIm5hbWUiOiJEcnVnLVJlZ2lzdHJ5LXVtYSIsImlkIjoxNjgsInV1aWQiOiI3MWYxYTU0NC1jYzUyLTRkODItOGM4MS02NjVkNzI5NzY5ZTgifSwiaXNzIjoiaHR0cHM6XC9cL3dzbzJwcm9kLmFiZG0uZ292LmluOjQ0M1wvb2F1dGgyXC90b2tlbiIsInRpZXJJbmZvIjp7IlVubGltaXRlZCI6eyJ0aWVyUXVvdGFUeXBlIjoicmVxdWVzdENvdW50IiwiZ3JhcGhRTE1heENvbXBsZXhpdHkiOjAsImdyYXBoUUxNYXhEZXB0aCI6MCwic3RvcE9uUXVvdGFSZWFjaCI6dHJ1ZSwic3Bpa2VBcnJlc3RMaW1pdCI6MCwic3Bpa2VBcnJlc3RVbml0Ijoic2VjIn19LCJrZXl0eXBlIjoiUFJPRFVDVElPTiIsInBlcm1pdHRlZFJlZmVyZXIiOiIiLCJzdWJzY3JpYmVkQVBJcyI6W3sic3Vic2NyaWJlclRlbmFudERvbWFpbiI6ImNhcmJvbi5zdXBlciIsIm5hbWUiOiJEcnVnLVJlZ2lzdHJ5LVVNQSIsImNvbnRleHQiOiJcL2FwaVwvZHJ1Zy1yZWdpc3RyeVwvdjFcL3VtYSIsInB1Ymxpc2hlciI6ImFkbWluIiwidmVyc2lvbiI6InVtYSIsInN1YnNjcmlwdGlvblRpZXIiOiJVbmxpbWl0ZWQifSx7InN1YnNjcmliZXJUZW5hbnREb21haW4iOiJjYXJib24uc3VwZXIiLCJuYW1lIjoiRHJ1Zy1SZWdpc3RyeSIsImNvbnRleHQiOiJcL2FwaVwvZHJ1Zy1yZWdpc3RyeVwvdjEiLCJwdWJsaXNoZXIiOiJhZG1pbiIsInZlcnNpb24iOiJ2MSIsInN1YnNjcmlwdGlvblRpZXIiOiJVbmxpbWl0ZWQifSx7InN1YnNjcmliZXJUZW5hbnREb21haW4iOiJjYXJib24uc3VwZXIiLCJuYW1lIjoiUEhSLUFCSEEtQVBQTElDQVRJT04tRU5ST0xMTUVOVCIsImNvbnRleHQiOiJcL2FwaVwvcGhyXC93ZWJcL3YzIiwicHVibGlzaGVyIjoiYWRtaW4iLCJ2ZXJzaW9uIjoidjMiLCJzdWJzY3JpcHRpb25UaWVyIjoiVW5saW1pdGVkIn1dLCJ0b2tlbl90eXBlIjoiYXBpS2V5IiwicGVybWl0dGVkSVAiOiIiLCJpYXQiOjE3NjUzNTc5OTEsImp0aSI6Ijk0MWQyNzEwLWRhMDQtNDZmOC1hZTgzLTAwM2M2MzRkODlmZCJ9.ZUHm1tf2pSGgXvm_ywzgdzy7KL-_uMgoXUcL1t2lAFO1akSUh6LduTtfx6NQbq0ZXkGOQ8uI0xkCqWG3DbGyAX5rJd__VKoR9LoORUSEFTF2iMqS2EBpXcLakFL9DGl1jodiFxl8bUAov1azb4zmVFD7O1hgCQ3pC6FNOB1RltIacnALlFkoz1vCTW9QtcqK1hdxZNMVX5xBZzGt5Dq1JRHuYyRWewEa3OP2V9oLCG9aJ2DFA7KMtanJF5gzESZwDglbMd25Uv1B9L7Lgeganye9tYNH5qKGXWHLy9d-jOa4rNwEP3kV_sr5BOhk_IvZUBjvx6p-qTlGyu3GqhdeMw==';
+
+const registryBaseUrl = "https://drugregistry.abdm.gov.in";
+
+export async function registryGet<T>(path: string): Promise<T> {
+  try {
+    const response = await fetch(new URL(path, registryBaseUrl), {
+      headers: { apikey: process.env.ABDM_DRUG_REGISTRY_API_KEY || publicPortalApiKey, accept: "application/json" },
+      signal: AbortSignal.timeout(8_000)
+    });
+    if (!response.ok) throw new ApiRequestError(502, "DRUG_REGISTRY_UNAVAILABLE", `ABDM Drug Registry returned ${response.status}.`);
+    return await response.json() as T;
+  } catch (error) {
+    if (error instanceof ApiRequestError) throw error;
+    throw new ApiRequestError(502, "DRUG_REGISTRY_UNAVAILABLE", "ABDM Drug Registry could not be reached.");
+  }
+}

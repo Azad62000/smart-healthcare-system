@@ -1,6 +1,7 @@
 # Dependencies
 node_modules/
 **/node_modules/
+**/.venv/
 
 # Next.js and build output
 .next/
@@ -24,3 +25,8 @@ test-results/
 .DS_Store
 # TypeScript incremental compiler cache
 *.tsbuildinfo
+
+# Python bytecode and local test caches
+__pycache__/
+*.py[cod]
+.pytest_cache/

@@ -28,7 +28,6 @@ export default function PatientDashboard() {
   const [records, setRecords] = useState<HealthRecord[]>([]);
   const [recordsLoading, setRecordsLoading] = useState(true);
   const [recordsError, setRecordsError] = useState("");
-
   const loadProfile = useCallback(async () => {
     setLoading(true);
     setError("");

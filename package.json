@@ -4,7 +4,9 @@
   "private": true,
   "workspaces": ["apps/web", "services/api", "packages/shared"],
   "scripts": {
-    "dev": "concurrently -n api,web -c blue,green \"npm run dev -w @healthcare/api\" \"npm run dev -w @healthcare/web\"",
+    "dev": "concurrently -n api,web,qdiabetes -c blue,green,yellow \"npm run dev -w @healthcare/api\" \"npm run dev -w @healthcare/web\" \"python3 -m uvicorn main:app --app-dir services/qdiabetes --host 127.0.0.1 --port 8001\"",
+    "dev:symptom-classifier": "services/symptom_classifier/.venv/bin/python -m uvicorn main:app --app-dir services/symptom_classifier --host 127.0.0.1 --port 8002",
+    "setup:symptom-classifier": "python3 -m venv services/symptom_classifier/.venv && services/symptom_classifier/.venv/bin/python -m pip install --upgrade 'pip<26' && services/symptom_classifier/.venv/bin/python -m pip install -r services/symptom_classifier/requirements.txt",
     "build": "npm run build -w @healthcare/shared && npm run build -w @healthcare/api && npm run build -w @healthcare/web",
     "test": "npm run test -w @healthcare/api",
     "typecheck": "npm run typecheck -w @healthcare/shared && npm run typecheck -w @healthcare/api && npm run typecheck -w @healthcare/web"

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   MedicalDataCrypto,
   documentAdditionalData,
+  geminiChatAdditionalData,
   messageAdditionalData,
   parseMedicalDataKeys
 } from "../src/medical-data-crypto.js";
@@ -41,6 +42,16 @@ describe("medical-data encryption", () => {
     const pieces = first.split(".");
     pieces[4] = `${pieces[4]![0] === "A" ? "B" : "A"}${pieces[4]!.slice(1)}`;
     expect(() => crypto.decryptText(pieces.join("."), aad, true)).toThrow("could not be authenticated");
+  });
+
+  it("encrypts Gemini patient chat with patient and conversation context", () => {
+    const crypto = MedicalDataCrypto.fromConfiguration(`active:${primaryKey}`);
+    const aad = geminiChatAdditionalData("conversation", "message", "patient");
+    const encrypted = crypto.encryptText("private health chat", aad);
+    expect(encrypted).toMatch(/^shc1\.active\./);
+    expect(encrypted).not.toContain("private health chat");
+    expect(crypto.decryptText(encrypted, aad)).toBe("private health chat");
+    expect(() => crypto.decryptText(encrypted, geminiChatAdditionalData("conversation", "message", "another-patient"))).toThrow("could not be authenticated");
   });
 
   it("supports key IDs for rotation while preserving legacy plaintext reads", () => {

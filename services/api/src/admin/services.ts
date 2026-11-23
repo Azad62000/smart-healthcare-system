@@ -51,7 +51,7 @@ export function createAdminServicesRouter(auth: AuthRepository, checkDatabase: (
     });
     const optionalIntegrations: Array<{ name: string; configured: boolean; readyDetail: string; missingDetail: string }> = [
       {
-        name: "Email delivery",
+        name: "SMTP email delivery",
         configured: isEmailDeliveryConfigured(),
         readyDetail: "SMTP and email-code security settings are present; notification delivery runs through the background outbox.",
         missingDetail: "SMTP host, port, sender, and AUTH_OTP_PEPPER are required for account verification, recovery, and email notifications."

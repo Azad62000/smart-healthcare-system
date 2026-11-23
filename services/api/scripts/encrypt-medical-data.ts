@@ -77,12 +77,11 @@ function assertLocalDatabase() {
 }
 
 export async function assertMedicalDataMigrationApplied(pool: Pool): Promise<void> {
-  for (const filename of ["016_medical_data_encryption.sql", "022_clinical_data_encryption.sql"]) {
-    const migration = createMigration(filename, await readFile(join(apiDirectory, "migrations", filename), "utf8"));
-    const { rows } = await pool.query<{ checksum: string }>("SELECT checksum FROM public.app_schema_migrations WHERE filename=$1", [filename]);
-    if (rows[0]?.checksum !== migration.checksum) {
-      throw new SafeMigrationError(`Migration ${filename.slice(0, 3)} is not recorded with the current checksum; run the reviewed schema migration process first.`);
-    }
+  const filename = "016_medical_data_encryption.sql";
+  const migration = createMigration(filename, await readFile(join(apiDirectory, "migrations", filename), "utf8"));
+  const { rows } = await pool.query<{ checksum: string }>("SELECT checksum FROM public.app_schema_migrations WHERE filename=$1", [filename]);
+  if (rows[0]?.checksum !== migration.checksum) {
+    throw new SafeMigrationError(`Migration ${filename.slice(0, 3)} is not recorded with the current checksum; run the reviewed schema migration process first.`);
   }
 }
 

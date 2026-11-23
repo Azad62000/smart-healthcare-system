@@ -42,7 +42,10 @@ const baselineMarkers: Record<string, Array<[string, string]>> = {
   "024_identity_verification_and_mfa_recovery.sql": [["doctors", "license_status"], ["auth_email_codes", "purpose"]],
   "025_remove_phone_otp.sql": [["patients", "phone"]],
   "026_email_notifications.sql": [["email_outbox", "event_key"], ["email_outbox", "status"]],
-  "027_backfill_video_consultations.sql": [["teleconsultations", "room_name"]]
+  "027_backfill_video_consultations.sql": [["teleconsultations", "room_name"]],
+  "028_medgemma_patient_chat.sql": [["medgemma_conversations", "patient_user_id"], ["medgemma_messages", "encryption_version"]],
+  "029_medgemma_message_sequence.sql": [["medgemma_messages", "sequence"]],
+  "030_gemini_patient_chat.sql": [["gemini_conversations", "patient_user_id"], ["gemini_messages", "encryption_version"]]
 };
 
 export function createMigration(filename: string, sql: string): Migration {

@@ -6,6 +6,10 @@ export function messageAdditionalData(conversationId: string, messageId: string,
   return `smart-healthcare|message|v1|${conversationId}|${messageId}|${senderUserId}`;
 }
 
+export function geminiChatAdditionalData(conversationId: string, messageId: string, patientUserId: string): string {
+  return `smart-healthcare|gemini-chat|v1|${conversationId}|${messageId}|${patientUserId}`;
+}
+
 export function documentAdditionalData(storageKey: string, mediaType: string): string {
   return `smart-healthcare|document|v1|${storageKey}|${mediaType}`;
 }

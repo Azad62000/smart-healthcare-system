@@ -45,6 +45,8 @@ import { PrivateDocumentStorage } from "./documents/storage.js";
 import { MedicalDataCrypto } from "./medical-data-crypto.js";
 import { createFeedbackRouter } from "./feedback/routes.js";
 import { PostgresFeedbackRepository } from "./feedback/repository.js";
+import { createDrugRouter } from "./drugs/routes.js";
+import { PostgresGeminiChatRepository } from "./ai/gemini-repository.js";
 
 const medicalDataCrypto = MedicalDataCrypto.fromConfiguration(config.MEDICAL_DATA_ENCRYPTION_KEYS);
 export const app = express();
@@ -129,7 +131,8 @@ app.use("/api/v1/prescriptions", createPrescriptionRouter(
   doctorRepository,
   sessionCookieName
 ));
-app.use("/api/v1/ai", createAiRouter(new PostgresAuthRepository(pool), sessionCookieName));
+app.use("/api/v1/ai", createAiRouter(new PostgresAuthRepository(pool), sessionCookieName, new PostgresGeminiChatRepository(pool, medicalDataCrypto)));
+app.use("/api/v1/drugs", createDrugRouter(new PostgresAuthRepository(pool), sessionCookieName));
 export const chatAuthRepository = new PostgresAuthRepository(pool);
 export const chatRepository = new PostgresChatRepository(pool, medicalDataCrypto);
 export const chatRateLimiter = new ChatRateLimiter();
