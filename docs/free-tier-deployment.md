@@ -21,12 +21,12 @@ Neon's current Free plan includes 100 CU-hours per project per month, 1 GB of da
 
 ## 2. Cloudflare R2
 
-1. Create an R2 bucket with the **Standard** storage class. Keep the bucket private; do not enable public access or `r2.dev`.
+1. In Cloudflare, open **Storage & databases → R2 → Overview** and complete the R2 subscription checkout, then create a bucket with the **Standard** storage class. Keep the bucket private; do not enable public access or `r2.dev`.
 2. Create an R2 API token limited to **Object Read & Write** for this bucket only.
 3. Copy the Account ID, bucket name, Access Key ID, and Secret Access Key into the Render environment variables below. Do not put them in Git, Vercel, or a client-side variable.
 4. Keep the medical encryption key separately backed up. R2 stores ciphertext from the app's existing AES-256-GCM encryption; it does not replace that key.
 
-R2's current monthly free allowance is 10 GB-month of Standard storage, 1 million Class A operations, and 10 million Class B operations; egress is free. Usage above the allowance is priced, so monitor R2 usage and keep this demo below the limits. If the dashboard requires billing details, review the account's overage behavior before enabling R2; this repo cannot impose a billing cap. [Cloudflare R2 pricing](https://developers.cloudflare.com/r2/pricing/) · [R2 S3 credentials and endpoint](https://developers.cloudflare.com/r2/get-started/s3/)
+R2's current monthly free allowance is 10 GB-month of Standard storage, 1 million Class A operations, and 10 million Class B operations; egress is free. Cloudflare requires an R2 subscription checkout and bills usage beyond the allowance. This app does not enforce a Cloudflare spend cap, so review the account's billing and overage behavior before completing checkout. If strict zero-charge operation is required, do not activate R2 until you have a verified hard billing limit. [Cloudflare R2 pricing](https://developers.cloudflare.com/r2/pricing/) · [R2 subscription setup](https://developers.cloudflare.com/r2/get-started/) · [R2 S3 credentials and endpoint](https://developers.cloudflare.com/r2/get-started/s3/)
 
 ## 3. Vercel frontend
 
@@ -40,7 +40,7 @@ Vercel's Hobby plan is free for personal use. Usage limits can pause some featur
 
 ## 4. Render API
 
-1. In the Render Dashboard, create a Blueprint from this repository and select `render-free.yaml` as the Blueprint file. This file explicitly sets the API to `plan: free`; it does not create a database or change any paid Render service.
+1. Confirm the Render workspace has no payment method attached if you require a hard $0 limit: Render bills free services for outbound bandwidth or build pipeline overages when a payment method is on file. Without one, those quotas suspend services or pause new builds instead. In the Render Dashboard, create a Blueprint from this repository and select `render-free.yaml` as the Blueprint file. This file explicitly sets the API to `plan: free`; it does not create a database or change any paid Render service.
 2. In the Blueprint prompt, supply the values below. Select **Free** if the dashboard asks for a compute plan; do not upgrade the service.
 3. For the first API deploy, set `WEB_ORIGIN` to the exact Vercel production origin from step 3. Keep `SESSION_COOKIE_SAME_SITE=none` for the default Vercel and Render domains.
 4. Wait for the service to become live, then copy its HTTPS `onrender.com` URL.
