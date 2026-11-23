@@ -402,6 +402,28 @@ main:not(.welcome-page) { max-width: 80rem; }
 .assistant-file-chip > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .assistant-file-chip .text-button { width: auto; height: auto; margin-left: auto; padding: .2rem; color: #7c5b50; font-size: .7rem; }
 .assistant-file-note { margin-top: -.25rem !important; color: #778681 !important; }
+.fracatlas-card { display: grid; gap: 1rem; max-width: 70rem; margin: 0 auto 1.2rem; padding: clamp(1rem, 3vw, 1.6rem); }
+.fracatlas-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.fracatlas-heading h2 { margin: .2rem 0 0; color: #244440; font-size: 1.15rem; }
+.fracatlas-intro { max-width: 58rem; margin: 0; color: #637671; line-height: 1.6; }
+.fracatlas-setup { margin: 0; }
+.fracatlas-setup code { padding: .1rem .3rem; border-radius: .25rem; background: #edf2f0; color: #315850; }
+.fracatlas-upload-row { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; }
+.fracatlas-file-button { position: relative; overflow: hidden; cursor: pointer; }
+.fracatlas-file-button input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.fracatlas-filename { flex: 1; min-width: 12rem; overflow: hidden; color: #647872; font-size: .8rem; text-overflow: ellipsis; white-space: nowrap; }
+.fracatlas-preview-wrap { display: flex; justify-content: center; overflow: auto; padding: .75rem; border: 1px solid #e2ece7; border-radius: .8rem; background: #17211f; }
+.fracatlas-preview { position: relative; display: inline-block; max-width: 100%; }
+.fracatlas-preview img { display: block; width: auto; max-width: min(100%, 52rem); max-height: 65vh; object-fit: contain; }
+.fracatlas-overlay { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.fracatlas-overlay rect { fill: #ef5b4a20; stroke: #ff6a56; stroke-width: 3; vector-effect: non-scaling-stroke; }
+.fracatlas-overlay text { fill: white; stroke: #17211f; stroke-width: 3px; paint-order: stroke; font: bold 16px sans-serif; }
+.fracatlas-result { padding: 1rem; border: 1px solid #e7dcc7; border-radius: .8rem; background: #fffaf0; color: #695638; }
+.fracatlas-result.has-candidates { border-color: #edc6b6; background: #fff5ef; color: #744338; }
+.fracatlas-result h3 { margin: 0 0 .45rem; font-size: 1rem; }
+.fracatlas-result ul { margin: .5rem 0; padding-left: 1.2rem; }
+.fracatlas-result p { margin: .5rem 0 0; font-size: .82rem; line-height: 1.55; }
+.fracatlas-privacy { margin: 0; color: #788782; font-size: .75rem; }
 .gemini-free-tier-consent { display: flex; grid-column: 1 / -1; align-items: flex-start; gap: .5rem; color: #765e33; font-size: .73rem; line-height: 1.45; }
 .gemini-free-tier-consent input { flex: 0 0 auto; margin-top: .12rem; }
 @media (max-width: 850px) { .health-assistant-layout { grid-template-columns: 1fr; } .health-assistant-history ul { grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); } }

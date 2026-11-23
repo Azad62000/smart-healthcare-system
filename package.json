@@ -4,9 +4,11 @@
   "private": true,
   "workspaces": ["apps/web", "services/api", "packages/shared"],
   "scripts": {
-    "dev": "concurrently -n api,web,qdiabetes -c blue,green,yellow \"npm run dev -w @healthcare/api\" \"npm run dev -w @healthcare/web\" \"python3 -m uvicorn main:app --app-dir services/qdiabetes --host 127.0.0.1 --port 8001\"",
+    "dev": "concurrently -n api,web,qdiabetes,fracatlas -c blue,green,yellow,magenta \"npm run dev -w @healthcare/api\" \"npm run dev -w @healthcare/web\" \"python3 -m uvicorn main:app --app-dir services/qdiabetes --host 127.0.0.1 --port 8001\" \"if [ -x services/fracatlas/.venv/bin/python ]; then services/fracatlas/.venv/bin/python -m uvicorn main:app --app-dir services/fracatlas --host 127.0.0.1 --port 8003; else echo 'Run npm run setup:fracatlas to enable FracAtlas.'; fi\"",
     "dev:symptom-classifier": "services/symptom_classifier/.venv/bin/python -m uvicorn main:app --app-dir services/symptom_classifier --host 127.0.0.1 --port 8002",
     "setup:symptom-classifier": "python3 -m venv services/symptom_classifier/.venv && services/symptom_classifier/.venv/bin/python -m pip install --upgrade 'pip<26' && services/symptom_classifier/.venv/bin/python -m pip install -r services/symptom_classifier/requirements.txt",
+    "dev:fracatlas": "services/fracatlas/.venv/bin/python -m uvicorn main:app --app-dir services/fracatlas --host 127.0.0.1 --port 8003",
+    "setup:fracatlas": "python3.11 -m venv services/fracatlas/.venv && services/fracatlas/.venv/bin/python -m pip install --upgrade 'pip<26' && services/fracatlas/.venv/bin/python -m pip install -r services/fracatlas/requirements.txt",
     "build": "npm run build -w @healthcare/shared && npm run build -w @healthcare/api && npm run build -w @healthcare/web",
     "test": "npm run test -w @healthcare/api",
     "typecheck": "npm run typecheck -w @healthcare/shared && npm run typecheck -w @healthcare/api && npm run typecheck -w @healthcare/web"

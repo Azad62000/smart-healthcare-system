@@ -48,6 +48,7 @@ const environmentSchema = z.object({
   DOCUMENT_MAX_BYTES: z.coerce.number().int().min(1_048_576).max(25_000_000).default(10_000_000),
   ABDM_DRUG_REGISTRY_API_KEY: optionalString,
   SYMPTOM_CLASSIFIER_SERVICE_URL: z.preprocess((value) => value === "" ? undefined : value, z.string().url().optional()),
+  FRACATLAS_SERVICE_URL: z.preprocess((value) => value === "" ? undefined : value, z.string().url().default("http://127.0.0.1:8003")),
   GEMINI_API_KEY: optionalString,
   GEMINI_MODEL: z.preprocess((value) => value === "" ? undefined : value, z.string().trim().regex(/^gemini-[a-z0-9.-]+$/).default("gemini-3.5-flash-lite"))
 }).strict().superRefine((value, context) => {
@@ -71,7 +72,7 @@ const environmentSchema = z.object({
   }
 });
 
-const environmentKeys = ["NODE_ENV", "API_HOST", "API_PORT", "WEB_ORIGIN", "LOG_LEVEL", "DATABASE_URL", "SESSION_COOKIE_SECURE", "SESSION_TTL_HOURS", "MEDICAL_DATA_ENCRYPTION_KEYS", "ADMIN_MFA_ENCRYPTION_KEY", "AUTH_OTP_PEPPER", "TRUSTED_PROXY_ADDRESSES", "API_PUBLIC_URL", "SMTP_HOST", "SMTP_PORT", "SMTP_SECURE", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM", "SMTP_FROM_NAME", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "FACEBOOK_APP_ID", "FACEBOOK_APP_SECRET", "FACEBOOK_GRAPH_API_VERSION", "LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "TELECONSULTATION_JOIN_WINDOW_MINUTES", "DOCTOR_RECOMMENDATIONS_ENABLED", "DOCUMENT_STORAGE_DIR", "DOCUMENT_MAX_BYTES", "ABDM_DRUG_REGISTRY_API_KEY", "SYMPTOM_CLASSIFIER_SERVICE_URL", "GEMINI_API_KEY", "GEMINI_MODEL"] as const;
+const environmentKeys = ["NODE_ENV", "API_HOST", "API_PORT", "WEB_ORIGIN", "LOG_LEVEL", "DATABASE_URL", "SESSION_COOKIE_SECURE", "SESSION_TTL_HOURS", "MEDICAL_DATA_ENCRYPTION_KEYS", "ADMIN_MFA_ENCRYPTION_KEY", "AUTH_OTP_PEPPER", "TRUSTED_PROXY_ADDRESSES", "API_PUBLIC_URL", "SMTP_HOST", "SMTP_PORT", "SMTP_SECURE", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM", "SMTP_FROM_NAME", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "FACEBOOK_APP_ID", "FACEBOOK_APP_SECRET", "FACEBOOK_GRAPH_API_VERSION", "LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "TELECONSULTATION_JOIN_WINDOW_MINUTES", "DOCTOR_RECOMMENDATIONS_ENABLED", "DOCUMENT_STORAGE_DIR", "DOCUMENT_MAX_BYTES", "ABDM_DRUG_REGISTRY_API_KEY", "SYMPTOM_CLASSIFIER_SERVICE_URL", "FRACATLAS_SERVICE_URL", "GEMINI_API_KEY", "GEMINI_MODEL"] as const;
 
 function applicationEnvironment(environment: NodeJS.ProcessEnv) {
   return Object.fromEntries(environmentKeys.flatMap((key) => environment[key] === undefined ? [] : [[key, environment[key]]]));
