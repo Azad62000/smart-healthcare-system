@@ -43,14 +43,8 @@ services:
       - key: SMTP_FROM_NAME
         value: Smart Healthcare Demo
       - key: DOCUMENT_STORAGE_DRIVER
-        value: r2
+        # Render Free has no persistent disk. Keep demo uploads ephemeral instead
+        # of requiring a Cloudflare R2 billing subscription.
+        value: local
       - key: DOCUMENT_MAX_BYTES
         value: "10000000"
-      - key: R2_ACCOUNT_ID
-        sync: false
-      - key: R2_BUCKET_NAME
-        sync: false
-      - key: R2_ACCESS_KEY_ID
-        sync: false
-      - key: R2_SECRET_ACCESS_KEY
-        sync: false
