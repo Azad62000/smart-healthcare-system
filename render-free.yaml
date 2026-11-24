@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: free
     autoDeploy: false
-    buildCommand: npm ci && npm run build -w @healthcare/shared && npm run build -w @healthcare/api
+    buildCommand: npm ci --include=dev && npm run build -w @healthcare/shared && npm run build -w @healthcare/api
     startCommand: npm run start -w @healthcare/api
     healthCheckPath: /health
     envVars:
