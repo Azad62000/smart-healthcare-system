@@ -5,7 +5,9 @@ services:
     plan: free
     autoDeploy: false
     buildCommand: npm ci --include=dev && npm run build -w @healthcare/shared && npm run build -w @healthcare/api
-    startCommand: npm run start -w @healthcare/api
+    # Render Free does not provide shell or one-off-job access. Run the
+    # idempotent, advisory-lock-protected migrations before each API start.
+    startCommand: npm run db:migrate -w @healthcare/api && npm run start -w @healthcare/api
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
