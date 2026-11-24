@@ -31,7 +31,7 @@ R2's current monthly free allowance is 10 GB-month of Standard storage, 1 millio
 ## 3. Vercel frontend
 
 1. Import the Git repository as a new Vercel project.
-2. Set **Root Directory** to `apps/web`, keep the **Next.js** framework preset, select Node.js **24.x** under **Settings → Build and Deployment**, and keep the detected npm install and build commands.
+2. Set **Root Directory** to `apps/web`, keep the **Next.js** framework preset, and select Node.js **24.x** under **Settings → Build and Deployment**. The app's `vercel.json` runs `npm ci --include=dev` so TypeScript and other build-time dev dependencies are installed from the repository lockfile; keep the detected Next.js build command.
 3. Add `NEXT_PUBLIC_API_URL` for Production. For the first build, use an HTTPS placeholder such as `https://api.example.invalid`; the app only checks that the production API URL is HTTPS while building. Replace it with the real Render API URL and redeploy after Render is live.
 4. Deploy once and copy the resulting production origin, for example `https://your-project.vercel.app`. Do not add API credentials to Vercel.
 5. Turn off preview deployments for this demo or leave them unused. The API's CORS allowlist is one exact `WEB_ORIGIN`, so preview domains are not allowed automatically.
